@@ -1,4 +1,3 @@
-# Manage-task
 # Workly — Đối soát bảng công bảo vệ
 
 Giao diện quản lý và đối soát bảng công bảo vệ, chạy hoàn toàn ở trình duyệt. Dữ liệu minh họa được hiển thị sẵn để thử giao diện; tải **cả hai file thật** để thay thế và xem kết quả thực tế.
@@ -21,9 +20,9 @@ Mở địa chỉ Vite hiển thị trên terminal. Kiểm tra bằng `npm test`
 
 ### Cấu trúc dữ liệu được hỗ trợ
 
-- **Bảng ngày ngang**: mỗi dòng là một nhân viên; cột ngày là `1`, `2`, ... `31`, `Ngày 1`, hoặc ngày Excel; ô có công thường ghi `X`, `C`, `1`, `8`, ... . Dòng chứa "Họ tên" có thể nằm ngay phía trên dòng ngày.
+- **Bảng ngày ngang**: mỗi dòng là một nhân viên; cột ngày là `1`, `2`, ... `31`, `Ngày 1`, hoặc ngày Excel; ô có công thường ghi `X`, `C`, `1`, `8`, `12`, `24`... . Có hỗ trợ mẫu biên bản nghiệm thu dịch vụ bảo vệ: tiêu đề song ngữ "Họ và tên (Full name)" ở dòng trên, ngày 1–30 ở dòng dưới, các dòng phân nhóm 12/24 giờ và phần ký xác nhận cuối bảng.
 - **Danh sách theo dòng**: mỗi dòng có cột họ tên và cột ngày/giờ (`01/09/2026`, `2026-09-01`, Excel date...). Bảng công danh sách có thể có thêm cột công/trạng thái; nếu chọn cột này, các ô trống, `0`, `N`, `P`, `nghỉ`, `vắng`... sẽ được bỏ qua. Dữ liệu chấm công cũng có thể dùng cột trạng thái nếu được phát hiện.
-- So sánh theo **họ tên đã chuẩn hóa + ngày** trong tháng được chọn; một người chấm nhiều lần trong ngày vẫn được tính là một ngày. Hiện tại chưa so sánh số giờ, số ca, vị trí, mã nhân viên, và chưa xử lý ca xuyên nửa đêm. Hai nhân viên trùng họ tên có thể bị gộp.
+- Hai định dạng **không cần giống nhau**: ô `12` giờ trong bảng tổng hợp và một dòng chấm công đều được quy về một cặp nhân viên–ngày. So sánh theo **họ tên đã chuẩn hóa + ngày** trong tháng được chọn; một người chấm nhiều lần trong ngày vẫn được tính là một ngày. Hiện tại chưa so sánh số giờ, số ca, vị trí, mã nhân viên, và chưa xử lý ca xuyên nửa đêm. Hai nhân viên trùng họ tên có thể bị gộp.
 
 > **Lưu ý:** Chưa có file Excel mẫu hay ảnh tham chiếu thực tế trong repo. Nếu file xuất của bạn có bố cục đặc biệt (tiêu đề gộp nhiều tầng, mã ca riêng, nhiều dòng trên cùng một người...), hãy cung cấp file mẫu đã ẩn dữ liệu nhạy cảm để điều chỉnh bộ đọc cho chính xác.
 

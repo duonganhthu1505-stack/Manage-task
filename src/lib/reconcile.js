@@ -3,8 +3,8 @@ import Papa from 'papaparse';
 
 export const normalize = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 const text = (value) => String(value ?? '').trim();
-const nameHeader = (value) => /^(ho va ten|ho ten|ten nhan vien|ten bao ve|nhan vien|bao ve|ho ten nv|employee|employee name|staff name|full name|name|ten nv|ten)$/i.test(normalize(value));
-const dateHeader = (value) => /^(ngay|ngay cham cong|ngay cong|ngay lam|thoi gian|thoi gian cham cong|date|datetime|check in|checkin|attendance date|gio vao|vao ca)$/i.test(normalize(value));
+const nameHeader = (value) => /^(ho va ten|ho ten|ten nhan vien|ten bao ve|nhan vien|bao ve|ho ten nv|employee|employee name|staff name|full name|name|ten nv|ten)( full name| employee name)?$/i.test(normalize(value));
+const dateHeader = (value) => /^(ngay|ngay cham cong|ngay cong|ngay lam|thoi gian|thoi gian cham cong|date|datetime|check in|checkin|attendance date|gio vao|vao ca)( date|datetime)?$/i.test(normalize(value));
 const markHeader = (value) => /^(cong|ca|ca lam|so cong|so ca|trang thai|ky hieu|status|work|shift|cham cong)$/i.test(normalize(value));
 const pad = (n) => String(n).padStart(2, '0');
 export const monthKey = (period) => /^\d{4}-\d{2}$/.test(period) ? period : '2026-09';
@@ -59,7 +59,7 @@ function isMarked(value) {
   return raw.length <= 12 && !/^(cong ty|company|ngay |nguoi |dai dien|ky |xac nhan)/.test(v);
 }
 const footerName = /^(cong ty( |$)|company( |$)|tong( |$)|cong$|dai dien( |$)|nguoi (lap|ky|duyet|xac nhan|kiem tra)|xac nhan( |$)|chu ky( |$)|ky ten( |$)|giam doc( |$)|prepared by|approved by|signature)/;
-const footerLabel = /^(xac nhan|chu ky|ky ten|ky va ghi ro|nguoi lap|nguoi duyet|nguoi ky|nguoi xac nhan|dai dien|approved by|prepared by|signature)/;
+const footerLabel = /^(tong( |$)|total( |$)|subtotal( |$)|xac nhan|chu ky|ky ten|ky va ghi ro|nguoi lap|nguoi duyet|nguoi ky|nguoi xac nhan|dai dien|approved by|prepared by|signature)/;
 function isFooterRow(row, nameCol) {
   if (footerName.test(normalize(row[nameCol]))) return true;
   return row.some((cell, col) => col !== +nameCol && footerLabel.test(normalize(cell)));

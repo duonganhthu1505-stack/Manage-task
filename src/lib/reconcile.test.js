@@ -103,9 +103,9 @@ test('stops matrix timesheet at sign-off block instead of treating signers and c
     ['Phạm Văn Phương', 'X', 'X', 'X'],
     ['Trần Quốc Bảo', 'X', '', 'X'],
     ['TỔNG CỘNG', 2, 1, 2],
-    ['Công ty TNHH Visual Comfort Việt Nam', '', '', 22],
-    ['DUONG ANH THU', '', '', 'X'],
-    ['Visual Comfort Vietnam Company Limited', '', '', 'X'],
+    ['Công ty TNHH Minh Họa', '', '', 22],
+    ['NGUYEN VAN A', '', '', 'X'],
+    ['Sample Security Company Limited', '', '', 'X'],
   ];
   const records = parseRecords(rows, 'summary', detectConfig(rows, 'summary', period), period);
   assert.equal(records.length, 5);
@@ -117,7 +117,7 @@ test('ignores signature dates and footer labels occupying daily cells', () => {
     ['Họ tên', 1, 2, 22],
     ['Phạm Văn Phương', 'X', '', 'X'],
     ['Người xác nhận', '', '', new Date(2026, 8, 22)],
-    ['DUONG ANH THU', '', '', 'X'],
+    ['NGUYEN VAN A', '', '', 'X'],
   ];
   const records = parseRecords(rows, 'summary', detectConfig(rows, 'summary', period), period);
   assert.equal(records.length, 2);
@@ -125,9 +125,37 @@ test('ignores signature dates and footer labels occupying daily cells', () => {
 });
 
 test('manual last employee row excludes signers even if no footer label exists', () => {
-  const rows = [['Họ tên', 1, 2], ['Phạm Văn Phương', 'X', 'X'], ['DUONG ANH THU', 'X', 'X']];
+  const rows = [['Họ tên', 1, 2], ['Phạm Văn Phương', 'X', 'X'], ['NGUYEN VAN A', 'X', 'X']];
   const config = { ...detectConfig(rows, 'summary', period), endRow: 2 };
   const records = parseRecords(rows, 'summary', config, period);
   assert.equal(records.length, 2);
   assert.ok(records.every(record => record.name === 'Phạm Văn Phương'));
+});
+
+test('reads two-level bilingual security acceptance timesheet and compares it with punch rows', () => {
+  const rows = Array.from({ length: 11 }, () => []);
+  rows.push(['STT', 'Vị trí', 'Họ và tên\n(Full name)', 'Vị trí\n(Position)', 'CÁC NGÀY TRONG THÁNG']); // Excel row 12
+  const dayHeader = Array(35).fill('');
+  for (let day = 1; day <= 30; day++) dayHeader[day + 3] = day; // E–AH, Excel row 13
+  rows.push(dayHeader);
+  rows.push(['12 giờ/ngày, 6 ngày/tuần']);
+  const staffA = Array(35).fill(''); staffA[0] = 1; staffA[1] = 'A3 - VCV'; staffA[2] = 'PHẠM VĂN PHƯƠNG'; staffA[3] = '12/24 giờ'; staffA[4] = 12; staffA[6] = 12;
+  rows.push(staffA); // Excel row 15
+  rows.push(['24 giờ/ngày, 7 ngày/tuần']);
+  const staffB = Array(35).fill(''); staffB[0] = 1; staffB[1] = 'A1 - VCV'; staffB[2] = 'VÕ VĂN RƯƠNG'; staffB[4] = 12;
+  rows.push(staffB);
+  rows.push(['Tổng cộng']);
+  const signer = Array(35).fill(''); signer[2] = 'NGUYEN VAN A'; signer[25] = 'X'; rows.push(signer);
+  const config = detectConfig(rows, 'summary', period);
+  assert.equal(config.headerRow, 12);
+  assert.equal(config.nameCol, 2);
+  assert.equal(config.mode, 'matrix');
+  const summary = parseRecords(rows, 'summary', config, period);
+  assert.equal(summary.length, 3);
+  assert.ok(summary.some(r => r.name === 'PHẠM VĂN PHƯƠNG' && r.date === '2026-09-01' && r.value === '12'));
+  const punchRows = [['Employee ID', 'Name', 'Position', 'Time', 'Date'], ['BV01', 'Pham Van Phuong', 'Security', '07:10', '03/09/2026'], ['BV02', 'Vo Van Ruong', 'Security', '07:05', '01/09/2026']];
+  const punches = parseRecords(punchRows, 'attendance', detectConfig(punchRows, 'attendance', period), period);
+  const result = compareRecords(summary, punches);
+  assert.ok(result.differences.some(r => r.name === 'PHẠM VĂN PHƯƠNG' && r.date === '2026-09-01' && r.kind === 'missing'));
+  assert.equal(result.matched.length, 2);
 });

@@ -1,1 +1,30 @@
 # Manage-task
+# Workly — Đối soát bảng công bảo vệ
+
+Giao diện quản lý và đối soát bảng công bảo vệ, chạy hoàn toàn ở trình duyệt. Dữ liệu minh họa được hiển thị sẵn để thử giao diện; tải **cả hai file thật** để thay thế và xem kết quả thực tế.
+
+## Chạy dự án
+
+```bash
+npm install
+npm run dev
+```
+
+Mở địa chỉ Vite hiển thị trên terminal. Kiểm tra bằng `npm test` và `npm run build`.
+
+## Cách dùng
+
+1. Chọn **tháng đối soát** ở góc phải.
+2. Tải lên **bảng công tổng hợp** và **dữ liệu chấm công** (`.xlsx` hoặc `.csv`, tối đa 15 MB/file). Có thể nhấn để chọn hoặc kéo thả file.
+3. Hệ thống tự đọc trang tính đầu tiên và tìm cột họ tên, ngày, công/trạng thái. Nếu cấu trúc file khác, mở **Cấu hình cột dữ liệu** ở dưới từng file để chọn trang tính, dòng tiêu đề, kiểu bảng và cột tương ứng. Bảng **Xem trước dữ liệu trong file** đánh dấu cột họ tên/ngày đang chọn; hãy tránh chọn `Employee ID` thay cho `Name`. Với bảng công có phần ký xác nhận ở cuối, chọn **Cuối bảng** để xem và dùng **Dòng cuối nhân viên** nếu cần giới hạn phạm vi nhân viên. Nếu ngày trong file khác tháng đang chọn, hệ thống sẽ báo tháng thực tế đọc được.
+4. Xem danh sách **Chênh lệch** / **Đã khớp**, tìm kiếm, lọc và xuất báo cáo CSV.
+
+### Cấu trúc dữ liệu được hỗ trợ
+
+- **Bảng ngày ngang**: mỗi dòng là một nhân viên; cột ngày là `1`, `2`, ... `31`, `Ngày 1`, hoặc ngày Excel; ô có công thường ghi `X`, `C`, `1`, `8`, ... . Dòng chứa "Họ tên" có thể nằm ngay phía trên dòng ngày.
+- **Danh sách theo dòng**: mỗi dòng có cột họ tên và cột ngày/giờ (`01/09/2026`, `2026-09-01`, Excel date...). Bảng công danh sách có thể có thêm cột công/trạng thái; nếu chọn cột này, các ô trống, `0`, `N`, `P`, `nghỉ`, `vắng`... sẽ được bỏ qua. Dữ liệu chấm công cũng có thể dùng cột trạng thái nếu được phát hiện.
+- So sánh theo **họ tên đã chuẩn hóa + ngày** trong tháng được chọn; một người chấm nhiều lần trong ngày vẫn được tính là một ngày. Hiện tại chưa so sánh số giờ, số ca, vị trí, mã nhân viên, và chưa xử lý ca xuyên nửa đêm. Hai nhân viên trùng họ tên có thể bị gộp.
+
+> **Lưu ý:** Chưa có file Excel mẫu hay ảnh tham chiếu thực tế trong repo. Nếu file xuất của bạn có bố cục đặc biệt (tiêu đề gộp nhiều tầng, mã ca riêng, nhiều dòng trên cùng một người...), hãy cung cấp file mẫu đã ẩn dữ liệu nhạy cảm để điều chỉnh bộ đọc cho chính xác.
+
+File được đọc ở trình duyệt, **không gửi lên máy chủ** và không lưu lại sau khi tải lại trang. Đối với dữ liệu bảo vệ thật, nên đối chiếu kết quả với bảng gốc trước khi chốt công.

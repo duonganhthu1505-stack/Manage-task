@@ -16,7 +16,8 @@ Mở địa chỉ Vite hiển thị trên terminal. Kiểm tra bằng `npm test`
 1. Chọn **tháng đối soát** ở góc phải.
 2. Tải lên **bảng công tổng hợp** và **dữ liệu chấm công** (`.xlsx` hoặc `.csv`, tối đa 15 MB/file). Có thể nhấn để chọn hoặc kéo thả file.
 3. Hệ thống tự đọc trang tính đầu tiên và tìm cột họ tên, ngày, công/trạng thái. Nếu cấu trúc file khác, mở **Cấu hình cột dữ liệu** ở dưới từng file để chọn trang tính, dòng tiêu đề, kiểu bảng và cột tương ứng. Bảng **Xem trước dữ liệu trong file** đánh dấu cột họ tên/ngày đang chọn; hãy tránh chọn `Employee ID` thay cho `Name`. Với bảng công có phần ký xác nhận ở cuối, chọn **Cuối bảng** để xem và dùng **Dòng cuối nhân viên** nếu cần giới hạn phạm vi nhân viên. Nếu ngày trong file khác tháng đang chọn, hệ thống sẽ báo tháng thực tế đọc được.
-4. Xem danh sách **Chênh lệch** / **Đã khớp**, tìm kiếm, lọc và xuất báo cáo CSV.
+4. Mở mục **Nhân sự** ở thanh bên để thêm họ tên bảo vệ và **chi nhánh / nơi làm việc**. Bạn có thể tự đặt tên chi nhánh, sửa hoặc xóa nhân sự; chi nhánh tự hình thành từ nơi làm việc đã gán. Danh sách nhân sự được lưu trên trình duyệt của thiết bị này.
+5. Ở mục **Quản lý bảo vệ**, chọn **Tất cả nhân viên** hoặc một chi nhánh trong **Phạm vi đối soát**. Khi lọc theo chi nhánh, chỉ những nhân viên đã gán vào chi nhánh đó mới được so sánh; tên trong file chưa có trong danh sách nhân sự sẽ được thông báo và bỏ qua trong chế độ lọc chi nhánh. Xem danh sách **Chênh lệch** / **Đã khớp**, tìm kiếm, lọc và xuất báo cáo CSV.
 
 ### Cấu trúc dữ liệu được hỗ trợ
 
@@ -26,4 +27,4 @@ Mở địa chỉ Vite hiển thị trên terminal. Kiểm tra bằng `npm test`
 
 > **Lưu ý:** Chưa có file Excel mẫu hay ảnh tham chiếu thực tế trong repo. Nếu file xuất của bạn có bố cục đặc biệt (tiêu đề gộp nhiều tầng, mã ca riêng, nhiều dòng trên cùng một người...), hãy cung cấp file mẫu đã ẩn dữ liệu nhạy cảm để điều chỉnh bộ đọc cho chính xác.
 
-File được đọc ở trình duyệt, **không gửi lên máy chủ** và không lưu lại sau khi tải lại trang. Đối với dữ liệu bảo vệ thật, nên đối chiếu kết quả với bảng gốc trước khi chốt công.
+Hai file bảng công được đọc trong trình duyệt, **không gửi lên máy chủ** và không lưu sau khi tải lại trang. Danh sách nhân sự và chi nhánh được lưu trong bộ nhớ lưu trữ cục bộ của trình duyệt để giữ lại sau khi đóng / tải lại trang; dữ liệu này không đồng bộ sang thiết bị khác. Đối với dữ liệu bảo vệ thật, nên đối chiếu kết quả với bảng gốc trước khi chốt công.

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Activity, ArrowDownToLine, ArrowRight, Bell, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Clock3, CloudUpload, FileSpreadsheet, FileText, FolderKanban, HelpCircle, LayoutDashboard, ListFilter, MapPin, Menu, MoreHorizontal, Pencil, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, UploadCloud, UsersRound, X } from 'lucide-react';
 import { cellPreview, columnLetter, compareRecords, createDemo, detectConfig, inspectSource, monthKey, normalize, parseRecords, readWorkbook, rowsForSheet, sourceError } from './lib/reconcile';
 import { ALL_BRANCHES_SCOPE, branchOptionsFor, canonicalBranchName, countPersonnelInBranch, filterRecordsByBranch, PERSONNEL_STORAGE_KEY, sanitizePersonnel, unregisteredNames, validatePersonnel } from './lib/personnel';
+import { fetchPersonnel, pushPersonnel, startPolling } from './lib/sync';
 import './style.css';
 
 const now = new Date();
@@ -216,6 +217,7 @@ function PersonnelPage({ personnel, setPersonnel, branches, notify, onBack }) {
 
     <div className="personnel-branch-list"><div><strong>Chi nhánh hiện có</strong><span>Danh sách được tổng hợp từ nơi làm việc đã gán cho nhân viên.</span></div>{branchCounts.length ? <div className="personnel-branch-chips">{branchCounts.map(branch => <span key={branch.id}><MapPin size={13} />{branch.name}<b>{branch.count}</b></span>)}</div> : <p>Chưa có chi nhánh. Thêm nhân sự và nhập tên nơi làm việc để bắt đầu.</p>}</div>
     <div className="bottom-note personnel-note"><div className="bottom-note-icon"><ShieldCheck size={20} /></div><div><strong>Lưu ý khi đối soát</strong><p>Hệ thống ghép nhân sự theo họ tên đã chuẩn hóa (không phân biệt dấu tiếng Việt). Hãy dùng tên nhất quán với hai file; mỗi họ tên chỉ nên khai báo một lần.</p></div><span>LƯU TRÊN THIẾT BỊ</span></div>
+    <div className="bottom-note personnel-note" style={{marginTop:'8px'}}><div className="bottom-note-icon"><CloudUpload size={20} /></div><div><strong>Dữ liệu tự động đồng bộ qua tất cả thiết bị</strong><p>Khi bạn thêm, sửa hoặc xóa nhân sự trên bất kỳ thiết bị nào, dữ liệu sẽ tự động lưu lên máy chủ và cập nhật trên tất cả thiết bị khác đang mở ứng dụng. Không cần thao tác thủ công.</p></div><span>ĐỒNG BỘ TỰ ĐỘNG</span></div>
   </>;
 }
 
@@ -229,6 +231,7 @@ function App() {
       return sanitizePersonnel(saved ? JSON.parse(saved) : []);
     } catch { return []; }
   });
+  const [cloudReady, setCloudReady] = useState(false);
   const [page, setPage] = useState('reconciliation');
   const [scope, setScope] = useState(ALL_BRANCHES_SCOPE);
   const [toast, setToast] = useState(null);
@@ -241,9 +244,42 @@ function App() {
   const scopeLabel = selectedBranch?.name || 'Tất cả nhân viên';
   const personnelInScope = countPersonnelInBranch(personnel, scope);
 
+  // On mount: fetch from cloud, override local if cloud has data.
   useEffect(() => {
-    try { globalThis.localStorage?.setItem(PERSONNEL_STORAGE_KEY, JSON.stringify(personnel)); } catch { /* Browser storage may be disabled. */ }
-  }, [personnel]);
+    let cancelled = false;
+    fetchPersonnel().then(cloud => {
+      if (cancelled || !cloud) { setCloudReady(true); return; }
+      const sanitized = sanitizePersonnel(cloud);
+      if (sanitized.length) {
+        setPersonnel(sanitized);
+        try { globalThis.localStorage?.setItem(PERSONNEL_STORAGE_KEY, JSON.stringify(sanitized)); } catch {}
+      }
+      setCloudReady(true);
+    }).catch(() => setCloudReady(true));
+    return () => { cancelled = true; };
+  }, []);
+
+  // Save to localStorage + push to cloud on every change.
+  useEffect(() => {
+    try { globalThis.localStorage?.setItem(PERSONNEL_STORAGE_KEY, JSON.stringify(personnel)); } catch {}
+    if (cloudReady) pushPersonnel(personnel);
+  }, [personnel, cloudReady]);
+
+  // Poll cloud for changes from other devices.
+  useEffect(() => {
+    if (!cloudReady) return;
+    const stop = startPolling(
+      () => personnel,
+      (cloud) => {
+        const sanitized = sanitizePersonnel(cloud);
+        if (sanitized.length) {
+          setPersonnel(sanitized);
+          try { globalThis.localStorage?.setItem(PERSONNEL_STORAGE_KEY, JSON.stringify(sanitized)); } catch {}
+        }
+      },
+    );
+    return stop;
+  }, [cloudReady]);
   useEffect(() => {
     if (scope !== ALL_BRANCHES_SCOPE && !branches.some(branch => branch.id === scope)) setScope(ALL_BRANCHES_SCOPE);
   }, [scope, branches]);
@@ -300,7 +336,7 @@ function App() {
           <div className="page-intro"><div><div className="eyebrow"><span className="eyebrow-line" /> VẬN HÀNH NHÂN SỰ <span className="eyebrow-separator">/</span> BẢO VỆ</div><h1>Đối soát bảng công <span>bảo vệ</span></h1><p>Tải lên dữ liệu, phát hiện chênh lệch và kiểm tra công bảo vệ trong một nơi.</p></div><div className="intro-actions"><label className="month-picker"><CalendarDays size={17} /><span>Tháng đối soát</span><input type="month" value={period} onChange={e => { if (e.target.value) { setPeriod(e.target.value); setSearch(''); } }} aria-label="Tháng đối soát" /></label><button className="export-btn" disabled={!result || !result.differences.length} onClick={() => exportCSV(result.differences, period, scopeLabel)}><ArrowDownToLine size={17} /> Xuất báo cáo</button></div></div>
           <div className="section-title-row"><div><span className="section-kicker">BƯỚC 01 — DỮ LIỆU ĐẦU VÀO</span><h2>Tải dữ liệu để đối soát</h2><p>Sử dụng hai file Excel cùng kỳ công để có kết quả chính xác.</p></div><button className="sample-link" onClick={resetDemo}><Sparkles size={16} /> Dùng dữ liệu mẫu <ArrowRight size={15} /></button></div>
           <div className="upload-grid">{['summary', 'attendance'].map((type, i) => <UploadCard key={type} type={type} index={i + 1} data={files[type]} config={configs[type]} onFile={(file, config) => updateFile(type, file, config)} onRemove={() => removeFile(type)} onConfig={(config, sheet) => changeConfig(type, config, sheet)} period={period} error={computed.errors[type]} diagnostics={computed.diagnostics[type]} notify={notify} />)}</div>
-          <div className="privacy-note"><div><ShieldCheck size={16} /> File được xử lý ngay trong trình duyệt, không tải lên máy chủ.</div><span><Clock3 size={15} /> Danh sách nhân sự lưu trên thiết bị này</span></div>
+          <div className="privacy-note"><div><ShieldCheck size={16} /> File được xử lý ngay trong trình duyệt, không tải lên máy chủ.</div><span><Clock3 size={15} /> Danh sách nhân sự tự động đồng bộ qua tất cả thiết bị</span></div>
           <div className="scope-filter-bar"><div className="scope-heading"><span className="scope-heading-icon"><UsersRound size={17} /></span><div><strong>Phạm vi đối soát</strong><small>{scope === ALL_BRANCHES_SCOPE ? (personnel.length ? 'Tất cả nhân viên có trong hai file sẽ được kiểm tra.' : 'Thêm nhân sự để có thể lọc theo chi nhánh.') : `Đang lọc ${formatNumber(personnelInScope)} nhân sự thuộc ${scopeLabel}.`}</small></div></div><div className="scope-actions"><label className="scope-select"><span>Kiểm tra</span><select value={scope} onChange={event => { setScope(event.target.value); setSearch(''); setFilter('all'); setTab('differences'); }} aria-label="Chọn phạm vi nhân sự"><option value={ALL_BRANCHES_SCOPE}>Tất cả nhân viên</option>{branches.map(branch => <option key={branch.id} value={branch.id}>Chi nhánh · {branch.name}</option>)}</select><ChevronDown size={14} /></label><button className="scope-manage-btn" onClick={() => navigate('personnel')}>Nhân sự <ArrowRight size={14} /></button></div></div>
           {scope !== ALL_BRANCHES_SCOPE && computed.unregistered.length > 0 && <div className="scope-warning"><CircleAlert size={17} /><div><strong>{formatNumber(computed.unregistered.length)} tên trong file chưa có trong danh sách nhân sự</strong><span>Các tên này không được tính khi lọc theo chi nhánh: {computed.unregistered.slice(0, 3).join(', ')}{computed.unregistered.length > 3 ? ` và ${computed.unregistered.length - 3} người khác` : ''}.</span></div><button onClick={() => navigate('personnel')}>Cập nhật nhân sự <ArrowRight size={14} /></button></div>}
           {result ? <>

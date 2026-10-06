@@ -1,6 +1,8 @@
-# Workly — Đối soát bảng công bảo vệ
+# Workly — Đối soát bảng công bảo vệ & kiểm tra payment nhà ăn
 
 Giao diện quản lý và đối soát bảng công bảo vệ, chạy hoàn toàn ở trình duyệt. Dữ liệu minh họa được hiển thị sẵn để thử giao diện; tải **cả hai file thật** để thay thế và xem kết quả thực tế.
+
+Từ mục **Nhà ăn → Quản lý nhà ăn → Kiểm tra payment** trong thanh bên, bạn có thể kiểm tra payment hàng tháng của nhà ăn: tải lên một file Excel gồm sheet **Pivot**, các sheet **Detail** và sheet **Payment**; hệ thống cộng gộp Detail theo từng người rồi so với **Pivot** (gốc so sánh), đồng thời so **Payment** với **Pivot**, liệt kê người **lệch số tiền** hoặc **thiếu ở một sheet**, kèm xuất báo cáo CSV.
 
 ## Chạy dự án
 
@@ -26,5 +28,14 @@ Mở địa chỉ Vite hiển thị trên terminal. Kiểm tra bằng `npm test`
 - Hai định dạng **không cần giống nhau**: ô `12` giờ trong bảng tổng hợp và một dòng chấm công đều được quy về một cặp nhân viên–ngày. So sánh theo **họ tên đã chuẩn hóa + ngày** trong tháng được chọn; một người chấm nhiều lần trong ngày vẫn được tính là một ngày. Hiện tại chưa so sánh số giờ, số ca, vị trí, mã nhân viên, và chưa xử lý ca xuyên nửa đêm. Hai nhân viên trùng họ tên có thể bị gộp.
 
 > **Lưu ý:** Chưa có file Excel mẫu hay ảnh tham chiếu thực tế trong repo. Nếu file xuất của bạn có bố cục đặc biệt (tiêu đề gộp nhiều tầng, mã ca riêng, nhiều dòng trên cùng một người...), hãy cung cấp file mẫu đã ẩn dữ liệu nhạy cảm để điều chỉnh bộ đọc cho chính xác.
+
+## Kiểm tra payment nhà ăn (hàng tháng)
+
+1. Mở mục **Nhà ăn → Quản lý nhà ăn → Kiểm tra payment** ở thanh bên, chọn **tháng kiểm tra**.
+2. Tải lên file Excel của tháng (`.xlsx`, tối đa 15 MB). Các sheet có tên chứa *pivot / tổng hợp*, *detail / chi tiết*, *payment / thanh toán* được tự gán vai trò; có thể đổi vai trò của từng sheet (hỗ trợ **nhiều sheet Detail** — được cộng gộp theo từng người).
+3. Mỗi sheet tự nhận diện dòng tiêu đề, cột họ tên và cột số tiền. Mở nút cấu hình bên phải sheet để chỉnh lại nếu file có bố cục khác (xem trước 6 dòng đầu sau khi đọc).
+4. **Pivot là gốc để so sánh**: Detail cộng lại phải khớp Pivot, Payment phải khớp Pivot. Kết quả hiển thị tổng tiền từng nguồn, số người **đã khớp / lệch số tiền / thiếu ở một sheet** (người không có ở một sheet chỉ được ghi chú, không tính là lệch tiền). Đặt **sai số cho phép** nếu muốn bỏ qua lệch nhỏ do làm tròn. Xuất báo cáo CSV bằng nút **Xuất báo cáo**.
+
+Quy ước đọc file payment: dòng *Tổng cộng / Grand Total / chữ ký* được bỏ qua; số tiền chấp nhận định dạng `1234567`, `1.234.567`, `1,234,567`, `1.234.567,89`, `3.500.000 đ`; ghép nhân viên theo họ tên đã chuẩn hóa (không phân biệt dấu). File chỉ được xử lý trong trình duyệt, không gửi lên máy chủ.
 
 Hai file bảng công được đọc trong trình duyệt, **không gửi lên máy chủ** và không lưu sau khi tải lại trang. Danh sách nhân sự và chi nhánh được lưu trong bộ nhớ lưu trữ cục bộ của trình duyệt để giữ lại sau khi đóng / tải lại trang; dữ liệu này không đồng bộ sang thiết bị khác. Đối với dữ liệu bảo vệ thật, nên đối chiếu kết quả với bảng gốc trước khi chốt công.

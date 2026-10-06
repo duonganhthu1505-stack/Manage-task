@@ -118,3 +118,75 @@
 @media(max-width:1020px){.personnel-overview{grid-template-columns:1fr 1fr}.personnel-overview-note{grid-column:1/-1;min-height:55px}}
 @media(max-width:760px){.scope-filter-bar{align-items:flex-start;flex-direction:column}.scope-actions{width:100%}.scope-select{flex:1;min-width:0}.scope-select select{flex:1;min-width:0;max-width:none}.scope-manage-btn{justify-content:center}.personnel-page-intro{align-items:flex-start}.personnel-page-actions{width:100%;justify-content:flex-start}.personnel-branch-list{align-items:flex-start;flex-direction:column}.personnel-branch-chips{justify-content:flex-start}}
 @media(max-width:540px){.scope-filter-bar{padding:12px}.scope-actions{align-items:stretch}.scope-select>span{display:none}.scope-select select{font-size:10px}.scope-manage-btn{padding:7px}.scope-warning{align-items:flex-start;flex-wrap:wrap}.scope-warning>div{flex-basis:calc(100% - 32px)}.scope-warning button{margin-left:27px}.personnel-page-intro{gap:13px}.personnel-page-actions{flex-wrap:wrap}.personnel-page-actions .personnel-secondary-btn{flex:1}.personnel-page-actions .personnel-primary-btn{flex:1}.personnel-overview{gap:8px}.personnel-overview-card{padding:10px;min-height:68px;gap:8px}.personnel-overview-icon{width:30px;height:30px}.personnel-overview-card strong{font-size:16px}.personnel-overview-card span{font-size:8.5px}.personnel-overview-note{padding:10px;font-size:9px}.personnel-card-heading{padding:16px 14px 13px}.personnel-form{margin:0 12px 12px;padding:12px}.personnel-form-fields{grid-template-columns:1fr}.personnel-toolbar{padding:0 12px 11px;flex-wrap:wrap}.personnel-search{max-width:none;flex-basis:100%}.personnel-filter{flex:1;min-width:0}.personnel-filter select{width:100%;min-width:0;max-width:none}.personnel-toolbar-add{margin-left:0}.personnel-table th:first-child,.personnel-table td:first-child{padding-left:13px}.personnel-table th:last-child,.personnel-table td:last-child{padding-right:13px}.personnel-table-footer{padding:11px 13px}.personnel-branch-list{padding:13px}.personnel-branch-list>div:first-child span{max-width:300px}.personnel-note>span{display:none}}
+/* Payment check (nhà ăn) */
+.upload-grid.single{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}
+.pay-guide h3{font-size:13px;letter-spacing:-.25px;color:#303741;margin-bottom:9px}
+.pay-guide ol{margin:0;padding-left:16px;color:#8d97a2;font-size:10.5px;line-height:2}
+.pay-guide b{color:#5c6773}
+.pay-sheets-card{margin-top:16px;padding:18px 20px}
+.pay-sheets-heading{display:flex;align-items:center;gap:7px;font-size:11px;color:#4c5662;margin-bottom:7px}
+.pay-sheets-note{font-size:10px;color:#9da6af;margin-bottom:12px;line-height:1.55}
+.pay-sheets-note b{color:#7c8792}
+.pay-roles-summary{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.pay-role-badge{font-size:9px;font-weight:800;letter-spacing:.4px;padding:5px 8px;border-radius:5px;border:1px solid #e6e9ed;color:#a2aab3;background:#fafbfc}
+.pay-role-badge.on{border-color:#dcebe2;background:#eff8f2;color:#588064}
+.pay-sheet-row{border:1px solid #edf0f2;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#fdfdfe}
+.pay-sheet-row.open{background:#fbfcfd;border-color:#e6eaee}
+.pay-sheet-main{display:flex;align-items:center;gap:10px}
+.pay-sheet-icon{width:32px;height:34px;background:#e9eeeb;color:#658775;border-radius:6px;display:grid;place-items:center;flex:none}
+.pay-sheet-info{flex:1;min-width:0}
+.pay-sheet-info strong{display:block;font-size:11px;color:#313b44;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pay-sheet-info span{font-size:9.5px;color:#a3abb4}
+.pay-sheet-error{display:inline-flex;align-items:center;gap:5px;color:#c65f54;font-size:9.5px;font-weight:700;white-space:nowrap}
+.pay-role-select{display:flex;align-items:center;height:32px;border:1px solid #e4e8ec;border-radius:6px;background:#fff;padding:0 8px;gap:6px;color:#a0a8b1;flex:none}
+.pay-role-select select{border:0;outline:0;background:none;font-size:10px;font-weight:700;color:#46515e;min-width:138px;appearance:none;cursor:pointer}
+.pay-role-select svg{pointer-events:none}
+.pay-config-toggle{border:0;background:none;color:#84909a;display:flex;align-items:center;gap:3px;padding:5px;flex:none}
+.pay-config-toggle svg:last-child{transition:transform .2s}
+.pay-config-toggle.open svg:last-child{transform:rotate(180deg)}
+.pay-config-toggle:hover:not(:disabled){color:#2c343e}
+.pay-config-toggle:disabled{opacity:.35}
+.pay-config{border-top:1px dashed #e7ebee;margin-top:11px;padding-top:13px}
+.config-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.pay-config-note{color:#9da6af;font-size:9.5px;margin-top:9px}
+.pay-config-skip{color:#c65f54}
+.pay-preview{overflow-x:auto;border:1px solid #e9edf0;border-radius:7px;margin-top:10px}
+.pay-preview table{min-width:430px}
+.pay-preview th{height:28px}
+.pay-preview td{height:30px;font-size:9.5px}
+.pay-demo-sources,.pay-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:15px}
+.pay-demo-sources{margin-top:16px}
+.pay-total-chip{background:#fff;border:1px solid #e8eaee;border-radius:9px;padding:12px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;box-shadow:0 3px 15px #27323f03}
+.pay-total-chip span{font-size:9px;font-weight:800;color:#98a1ab;letter-spacing:.6px;white-space:nowrap}
+.pay-total-chip strong{font:800 16px Manrope,'DM Sans',sans-serif;color:#333c46;letter-spacing:-.4px;white-space:nowrap}
+.pay-total-chip.empty strong{color:#b3bac2;font-size:12px}
+.pay-result-side{display:flex;align-items:center;gap:10px;flex:none}
+.pay-tolerance{display:flex;align-items:center;gap:7px;height:35px;border:1px solid #e5e9ed;border-radius:6px;background:#fff;padding:0 10px;color:#8b95a0}
+.pay-tolerance span{font-size:10px;white-space:nowrap}
+.pay-tolerance input{width:92px;border:0;outline:0;font-size:10.5px;font-weight:700;color:#46515e;background:none;text-align:right}
+.pay-tolerance input:focus-visible{outline:none}
+.pay-deltas{display:flex;flex-direction:column;gap:4px}
+.pay-delta{display:inline-flex;align-items:center;gap:5px;font-size:9.5px;font-weight:700;padding:4px 7px;border-radius:5px;width:max-content;white-space:nowrap}
+.pay-delta.up{background:#fcf4e9;color:#c49359}
+.pay-delta.down{background:#fcf0ed;color:#ce7668}
+.pay-ok{display:inline-flex;align-items:center;gap:5px;color:#69a87a;font-size:10px;font-weight:700}
+.pay-amount-cell strong{display:block;font-size:11px;color:#3a444f;font-weight:700}
+.pay-amount-cell small{display:block;margin-top:3px;color:#aeb6be;font-size:9px;white-space:nowrap}
+.pay-amount-none{color:#b7bec6;font-size:10px;font-style:italic}
+.status-pill.diff{background:#fcf0ed;color:#ce7668}
+.payment-table td{height:62px}
+@media(max-width:1020px){.config-grid.three{grid-template-columns:1fr 1fr}.pay-demo-sources,.pay-totals{grid-template-columns:1fr}.pay-result-side{width:100%;justify-content:space-between}}
+@media(max-width:760px){.upload-grid.single{grid-template-columns:1fr}.pay-sheet-main{flex-wrap:wrap}.pay-role-select{margin-left:42px}.pay-config-toggle{margin-left:auto}.config-grid.three{grid-template-columns:1fr}.pay-result-side{flex-wrap:wrap}}
+/* Canteen nav tree */
+.nav-parent{justify-content:flex-start}
+.nav-parent .nav-chevron{margin-left:auto;transition:transform .2s;color:#aeb4bc}
+.nav-parent.open .nav-chevron{transform:rotate(180deg)}
+.nav-sub{display:flex;flex-direction:column;gap:2px;margin:2px 6px 6px 24px;padding-left:9px;border-left:1px solid #eceff2}
+.nav-child{height:38px;font-size:12px;gap:10px;padding:0 12px}
+.nav-child .nav-active-dot{margin-left:auto}
+.pay-absent{display:inline-flex;align-items:center;gap:5px;font-size:9.5px;font-weight:700;padding:4px 7px;border-radius:5px;width:max-content;white-space:nowrap;background:#f0f2f4;color:#8a939d}
+.pay-realign-btn{margin-left:auto;padding:7px 10px;font-size:10px}
+.pay-key-samples{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.pay-key-samples i{font-style:normal;font-size:8.5px;font-weight:700;color:#66788a;background:#eef2f6;border:1px solid #e3e9ef;border-radius:4px;padding:2px 6px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pay-total-value{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0}
+.pay-total-value small{font-size:8.5px;color:#98a1ab;white-space:nowrap}

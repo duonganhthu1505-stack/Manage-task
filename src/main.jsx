@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, ArrowDownToLine, ArrowRight, Bell, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Clock3, CloudUpload, FileSpreadsheet, FileText, FolderKanban, HelpCircle, LayoutDashboard, ListFilter, MapPin, Menu, MoreHorizontal, Pencil, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, UploadCloud, UsersRound, X } from 'lucide-react';
+import { Activity, ArrowDownToLine, ArrowRight, Bell, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Clock3, CloudUpload, FileSpreadsheet, FileText, FolderKanban, HelpCircle, LayoutDashboard, ListFilter, MapPin, Menu, MoreHorizontal, Pencil, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, UploadCloud, UtensilsCrossed, UsersRound, Wallet, X } from 'lucide-react';
 import { cellPreview, columnLetter, compareRecords, createDemo, detectConfig, inspectSource, monthKey, normalize, parseRecords, readWorkbook, rowsForSheet, sourceError } from './lib/reconcile';
+import { parseCanteenDetail, parseCanteenPivot, parseCanteenPayment, checkCanteen, createCanteenDemo } from './lib/canteen.js';
 import { ALL_BRANCHES_SCOPE, branchOptionsFor, canonicalBranchName, countPersonnelInBranch, filterRecordsByBranch, PERSONNEL_STORAGE_KEY, sanitizePersonnel, unregisteredNames, validatePersonnel } from './lib/personnel';
 import './style.css';
 
@@ -11,6 +12,8 @@ const initialPeriod = `${previousMonth.getFullYear()}-${String(previousMonth.get
 const labels = { summary: 'Bảng công tổng hợp', attendance: 'Dữ liệu chấm công' };
 const demoFile = type => ({ kind: 'demo', name: type === 'summary' ? 'Bang_cong_bao_ve_mau.xlsx' : 'Cham_cong_bao_ve_mau.xlsx' });
 const formatNumber = number => new Intl.NumberFormat('vi-VN').format(number);
+const formatMoney = number => new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 }).format(number);
+const formatSigned = number => `${number > 0 ? '+' : ''}${formatMoney(number)}`;
 const formatDate = date => { const [year, month, day] = date.split('-'); return `${day}/${month}/${year}`; };
 function initials(name) { return name.trim().split(/\s+/).slice(-2).map(s => s[0]).join('').toUpperCase(); }
 function csvCell(value) { const safe = String(value ?? '').replace(/^[\s]*[=+@-]/, match => `'${match}`); return `"${safe.replaceAll('"', '""')}"`; }
@@ -23,7 +26,127 @@ function exportCSV(items, period, scopeLabel = 'Tất cả nhân viên') {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+const DELTA_LABELS = { 'pivot-detail': 'Pivot − Detail', 'payment-pivot': 'Payment − Pivot', price: 'Đơn giá', amount: 'Thành tiền' };
+
+function exportCanteenCSV(check, period) {
+  const rows = [['Phòng ban', 'Detail (cộng lại)', 'Pivot', 'Payment (phần)', 'Đơn giá', 'Thành tiền Payment', 'Trạng thái', 'Chi tiết vấn đề'], ...check.rows.filter(row => row.kind !== 'matched').map(row => [row.dept, row.detail ?? '', row.pivot ?? '', row.payment?.meals ?? '', row.payment?.price ?? '', row.payment?.amount ?? '', row.kind === 'diff' ? 'Lệch' : 'Thiếu', [...row.deltas.map(d => `${DELTA_LABELS[d.kind]}: ${formatSigned(d.delta)}`), ...row.notes].join(' | ')])];
+  const blob = new Blob(['\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a'); link.href = url; link.download = `kiem-tra-payment-nha-an-${period}.csv`; document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function DeltaChips({ row }) {
+  if (!row.deltas.length && !row.notes.length) return <span className="pay-ok"><Check size={12} strokeWidth={3} /> Khớp</span>;
+  return <div className="pay-deltas">{row.deltas.map(d => <span key={d.kind} className={`pay-delta ${d.kind === 'amount' || d.kind === 'price' ? 'down' : 'up'}`}>{DELTA_LABELS[d.kind]}: {formatSigned(d.delta)}</span>)}{row.notes.map(note => <span key={note} className="pay-absent">{note}</span>)}</div>;
+}
+
+function PaymentCheckPage({ notify }) {
+  const [period, setPeriod] = useState(initialPeriod);
+  const [file, setFile] = useState(null);
+  const [tolerance, setTolerance] = useState(0);
+  const [search, setSearch] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef(null);
+
+  const handleFile = async selected => {
+    if (!selected) return;
+    if (!/\.(xlsx|csv)$/i.test(selected.name)) { notify('Vui lòng chọn file .xlsx hoặc .csv.', true); return; }
+    if (selected.size > 15 * 1024 * 1024) { notify('File vượt quá giới hạn 15 MB.', true); return; }
+    setBusy(true);
+    try {
+      const workbook = await readWorkbook(selected);
+      setFile({ kind: 'file', name: selected.name, size: selected.size, workbook });
+      setSearch('');
+    } catch (e) { notify(`Không đọc được file: ${e.message}`, true); }
+    finally { setBusy(false); if (inputRef.current) inputRef.current.value = ''; }
+  };
+  const loadDemo = () => { setFile({ kind: 'demo', name: 'Du_lieu_nha_an_mau.xlsx' }); setSearch(''); notify('Đã tải dữ liệu nhà ăn minh họa.'); };
+  const clearFile = () => setFile(null);
+
+  const parsed = useMemo(() => {
+    if (!file) return null;
+    if (file.kind === 'demo') {
+      const demo = createCanteenDemo();
+      return { ...demo, check: checkCanteen(demo.details, demo.pivot, demo.payment, tolerance), demo: true };
+    }
+    const workbook = file.workbook;
+    const details = [];
+    let pivot = null, payment = null;
+    for (const name of workbook.SheetNames) {
+      const rows = rowsForSheet(workbook, name);
+      if (/payment/i.test(name)) { payment = parseCanteenPayment(rows); continue; }
+      if (/prio?vot/i.test(name)) { pivot = parseCanteenPivot(rows); continue; }
+      const detail = parseCanteenDetail(rows);
+      if (detail && detail.employees.length) details.push({ name, ...detail });
+    }
+    if (!pivot?.blocks?.length) for (const name of workbook.SheetNames) { const candidate = parseCanteenPivot(rowsForSheet(workbook, name)); if (candidate.blocks.length) { pivot = candidate; break; } }
+    if (!payment?.costSummary && !payment?.perDepartment?.size) for (const name of workbook.SheetNames) { const candidate = parseCanteenPayment(rowsForSheet(workbook, name)); if (candidate.costSummary || candidate.perDepartment.size) { payment = candidate; break; } }
+    if (!pivot || !payment || !details.length) return { error: 'Không nhận diện đủ cấu trúc nhà ăn trong file (cần sheet detail dạng nhân viên × ngày, sheet PRIOVOT và sheet Payment).', demo: false };
+    return { details, pivot, payment, check: checkCanteen(details, pivot, payment, tolerance), demo: false };
+  }, [file, tolerance]);
+
+  const check = parsed?.check;
+  const totals = check?.totals;
+  const isDemo = !!parsed?.demo;
+  const filteredRows = check ? check.rows.filter(row => !search || normalize(row.dept).includes(normalize(search))) : [];
+
+  return <>
+    <div className="page-intro"><div><div className="eyebrow"><span className="eyebrow-line" /> NHÀ ĂN <span className="eyebrow-separator">/</span> THANH TOÁN</div><h1>Kiểm tra payment <span>nhà ăn</span></h1><p>Detail cộng lại phải khớp Pivot; Payment phải khớp Pivot theo phòng ban và đơn giá Trung / Việt.</p></div><div className="intro-actions"><label className="month-picker"><CalendarDays size={17} /><span>Tháng kiểm tra</span><input type="month" value={period} onChange={e => { if (e.target.value) { setPeriod(e.target.value); setSearch(''); } }} aria-label="Tháng kiểm tra" /></label><button className="export-btn" disabled={!check || !check.differences.length} onClick={() => exportCanteenCSV(check, period)}><ArrowDownToLine size={17} /> Xuất báo cáo</button></div></div>
+
+    <div className="section-title-row"><div><span className="section-kicker">BƯỚC 01 — FILE BÁO CÁO THÁNG</span><h2>Tải file Meal Daily report</h2><p>Hệ thống tự nhận diện các sheet Detail, PRIOVOT và Payment trong file.</p></div>{!file && <button className="sample-link" onClick={loadDemo}><Sparkles size={16} /> Dùng dữ liệu mẫu <ArrowRight size={15} /></button>}</div>
+
+    <div className="upload-grid single">
+      <div className="upload-card">
+        <div className="upload-card-top"><div className="step-number">01</div><div className="upload-card-heading"><h3>File báo cáo nhà ăn của tháng</h3><p>Gồm các sheet detail (nhân viên × ngày), PRIOVOT và Payment</p></div>{file && <span className={`file-state ${isDemo ? 'demo-state' : ''}`}><span className="state-dot" />{isDemo ? 'Dữ liệu mẫu' : 'Đã tải lên'}</span>}</div>
+        <input ref={inputRef} type="file" accept=".xlsx,.csv" className="visually-hidden" onChange={e => handleFile(e.target.files?.[0])} aria-label="Chọn file nhà ăn" />
+        <div className={`dropzone ${dragging ? 'dragging' : ''} ${file ? 'has-file' : ''}`} onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={e => { e.preventDefault(); setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files?.[0]); }}>
+          {file ? <><div className="file-icon"><FileSpreadsheet size={23} strokeWidth={1.7} /></div><div className="file-info"><strong title={file.name}>{file.name}</strong><span>{isDemo ? 'File minh họa · Tải file thật để kiểm tra' : `${(file.size / 1024).toFixed(1)} KB · ${file.workbook.SheetNames.length} trang tính`}</span></div><button className="replace-btn" onClick={() => inputRef.current?.click()} title="Thay file" aria-label="Thay file"><CloudUpload size={18} /></button><button className="remove-btn" onClick={clearFile} title="Xóa file" aria-label="Xóa file"><X size={18} /></button></> : <button className="empty-dropzone" onClick={() => inputRef.current?.click()}><span className="upload-illustration"><UploadCloud size={24} strokeWidth={1.7} /></span><span><strong>{busy ? 'Đang đọc file...' : 'Nhấn để tải lên'} </strong>hoặc kéo thả file vào đây</span><small>Hỗ trợ .xlsx · Tối đa 15 MB</small></button>}
+        </div>
+      </div>
+      {!file && <div className="upload-card pay-guide"><h3>Cách hệ thống kiểm tra nhà ăn</h3><ol><li>Các sheet <b>detail</b> (nhân viên × ngày ăn) được cộng lại theo phòng ban.</li><li>Tổng detail phải khớp các khối trong <b>PRIOVOT</b> (Pivot được xây từ chính detail).</li><li><b>Payment</b> (Cost per Department) phải khớp Pivot theo <b>số phần ăn</b>, đơn giá Trung <b>50.000 ₫</b> / Việt <b>25.000 ₫</b> và thành tiền.</li></ol></div>}
+    </div>
+
+    {parsed?.error && <div className="scope-warning"><CircleAlert size={17} /><div><strong>Chưa nhận diện được cấu trúc file nhà ăn</strong><span>{parsed.error}</span></div></div>}
+
+    {parsed && !parsed.error && <div className="pay-roles-summary" style={{ marginBottom: 15 }}>
+      {parsed.details.map(sheet => <span key={sheet.name} className="pay-role-badge on">Detail · {sheet.name.trim()}: {formatNumber(sheet.totalMeals)} phần{sheet.totalTrung ? ` (${sheet.totalTrung} Trung)` : ''}</span>)}
+      {check.pivotBlocks.map(block => <span key={block.name} className="pay-role-badge on">Pivot · {block.name}: {formatNumber(block.grand)}</span>)}
+      <span className="pay-role-badge on">Payment: {formatNumber(totals.payMeals)} phần · {formatMoney(totals.payAmount)} ₫</span>
+    </div>}
+
+    {check && <>
+      <div className="section-title-row result-section-heading"><div><span className="section-kicker">BƯỚC 02 — KẾT QUẢ KIỂM TRA</span><h2>Tổng quan kết quả</h2><p>So khớp Detail → Pivot → Payment theo phòng ban; đơn giá Trung {formatMoney(totals.expatPrice)} ₫, Việt {formatMoney(totals.vietPrice)} ₫.</p></div><div className="pay-result-side"><label className="pay-tolerance"><span>Sai số cho phép</span><input type="number" min="0" step="1" value={tolerance} onChange={e => setTolerance(Math.max(0, Number(e.target.value) || 0))} aria-label="Sai số cho phép" /></label><span className={`result-indicator ${isDemo ? 'demo' : ''}`}><span />{isDemo ? 'Chế độ xem thử' : 'Dữ liệu thực tế'}</span></div></div>
+
+      <div className="stats-grid">
+        <StatCard icon={UsersRound} label="Phòng ban kiểm tra" value={check.rows.length} sub={`${check.matched.length} phòng ban khớp hoàn toàn`} tone="neutral" />
+        <StatCard icon={CheckCheck} label="Tổng phần ăn" value={totals.pivotTotal} sub={`Detail ${formatNumber(totals.detailTotal)} · Payment ${formatNumber(totals.payMeals)}`} tone="neutral" />
+        <StatCard icon={CircleAlert} label="Phòng ban lệch" value={check.differences.length} sub={`${check.dailyIssues.length} ngày lệch`} tone="red" />
+        <StatCard icon={FileText} label="Tổng tiền payment (₫)" value={totals.payAmount} sub={`kỳ vọng ${formatMoney(totals.expectedAmount)} ₫`} tone={Math.abs((totals.costSummaryAmount ?? totals.payAmount) - totals.expectedAmount) <= tolerance ? 'neutral' : 'amber'} />
+      </div>
+
+      <div className={`alert-banner ${check.differences.length || check.dailyIssues.length ? 'warning' : 'success'}`}><div className="alert-icon">{check.differences.length || check.dailyIssues.length ? <CircleAlert size={21} /> : <CheckCheck size={21} />}</div><div><strong>{check.differences.length || check.dailyIssues.length ? `Phát hiện ${check.differences.length} phòng ban lệch và ${check.dailyIssues.length} ngày lệch` : 'Detail, Pivot và Payment khớp nhau'}</strong><p>{check.differences.length || check.dailyIssues.length ? 'Xem bảng dưới để biết từng phòng ban lệch ở cặp nào (Pivot − Detail, Payment − Pivot, đơn giá, thành tiền).' : `Tổng phần ăn ${formatNumber(totals.detailTotal)} (Detail) = ${formatNumber(totals.pivotTotal)} (Pivot); tiền kỳ vọng khớp Payment.`}</p></div>{totals && <span className="alert-side">Trung: {formatNumber(totals.detailTrung)} / {totals.payExpatMeals ?? '—'} · Việt: {formatNumber(totals.detailViet)} / {totals.payVietMeals ?? '—'} <ArrowRight size={16} /></span>}</div>
+
+      <section className="results-card">
+        <div className="results-head"><div><h2>Chi tiết theo phòng ban</h2><p>Detail cộng lại so với Pivot; Payment so với Pivot (phần ăn, đơn giá, thành tiền)</p></div><span className="auto-badge"><span />Tự động cập nhật</span></div>
+        <div className="results-toolbar"><div className="tabs"><button className="selected">Tất cả <span>{check.rows.length}</span></button><button onClick={() => setSearch('')}>Lệch <span>{check.differences.length}</span></button></div><div className="table-controls"><label className="search-box"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm phòng ban..." aria-label="Tìm phòng ban" />{search && <button onClick={() => setSearch('')} aria-label="Xóa tìm kiếm"><X size={14} /></button>}</label></div></div>
+        <div className="table-scroll"><table className="payment-table"><thead><tr><th>PHÒNG BAN</th><th>DETAIL</th><th>PIVOT</th><th>PAYMENT</th><th>ĐƠN GIÁ</th><th>THÀNH TIỀN</th><th>SO SÁNH / TRẠNG THÁI</th></tr></thead><tbody>{filteredRows.map(row => <tr key={row.dept}><td><div className="person-cell"><span className="person-avatar">{initials(row.dept)}</span><div><strong>{row.dept}</strong><small>{row.people ? `${row.people} nhân viên · ${row.detailTrung || 0} phần Trung` : 'không có trong detail'}</small></div></div></td><td><div className="pay-amount-cell"><strong>{row.detail == null ? '—' : formatNumber(row.detail)}</strong></div></td><td><div className="pay-amount-cell"><strong>{row.pivot == null ? '—' : formatNumber(row.pivot)}</strong></div></td><td><div className="pay-amount-cell"><strong>{row.payment ? formatNumber(row.payment.meals) : '—'}</strong></div></td><td><div className="pay-amount-cell"><strong>{row.payment ? formatMoney(row.payment.price) : '—'}</strong>{row.payment && row.payment.price !== row.expectedPrice && <small>kỳ vọng {formatMoney(row.expectedPrice)}</small>}</div></td><td><div className="pay-amount-cell"><strong>{row.payment ? formatMoney(row.payment.amount) : '—'}</strong></div></td><td><span className={`status-pill ${row.kind}`} style={{ marginRight: 6 }}><span className="status-icon">{row.kind === 'matched' ? <Check size={13} strokeWidth={3} /> : <CircleAlert size={13} strokeWidth={2.4} />}</span>{row.kind === 'matched' ? 'Đã khớp' : row.kind === 'diff' ? 'Lệch' : 'Thiếu'}</span><DeltaChips row={row} /></td></tr>)}{filteredRows.length === 0 && <tr><td colSpan={7}><div className="empty-results"><Search size={25} /><strong>Không tìm thấy phòng ban</strong><span>Thử từ khóa khác.</span></div></td></tr>}</tbody></table></div>
+        <div className="table-footer"><span>Hiển thị <strong>{formatNumber(filteredRows.length)}</strong> / <strong>{formatNumber(check.rows.length)}</strong> phòng ban</span><span>{formatNumber(check.differences.length)} lệch · {formatNumber(check.missing.length)} thiếu</span></div>
+      </section>
+
+      {check.dailyIssues.length > 0 && <div className="scope-warning" style={{ marginTop: 14 }}><CircleAlert size={17} /><div><strong>{check.dailyIssues.length} ngày có tổng phần ăn khác giữa Detail và Payment</strong><span>{check.dailyIssues.slice(0, 6).map(d => `${d.date}: detail ${d.detail ?? '—'} / payment ${d.payment}`).join(' · ')}{check.dailyIssues.length > 6 ? ' …' : ''}</span></div></div>}
+
+      <div className="bottom-note"><div className="bottom-note-icon"><ShieldCheck size={20} /></div><div><strong>Cách hệ thống kiểm tra nhà ăn</strong><p>Mỗi sheet detail (ma trận nhân viên × ngày) được cộng lại theo phòng ban rồi so với khối tương ứng trong <b>PRIOVOT</b>; <b>Payment</b> (Cost per Department) được so với Pivot theo số phần ăn, đơn giá (phòng ban Trung/expat = {formatMoney(totals.expatPrice)} ₫, Việt = {formatMoney(totals.vietPrice)} ₫) và thành tiền = phần ăn × đơn giá. Ô "CT" và các dòng tổng cộng / chữ ký không tính là phần ăn.</p></div><span>WORKLY INSIGHT</span></div>
+    </>}
+
+    {!file && <div className="waiting-card"><div className="waiting-icon"><UtensilsCrossed size={27} /></div><h2>Sẵn sàng kiểm tra payment nhà ăn</h2><p>Tải lên file Meal Daily report của tháng: hệ thống tự cộng detail theo phòng ban, đối chiếu Pivot và kiểm tra tiền thanh toán theo đơn giá Trung / Việt.</p><button onClick={loadDemo}>Xem thử với dữ liệu mẫu <ArrowRight size={16} /></button></div>}
+  </>;
+}
+
 function Sidebar({ mobileOpen, close, notify, page, onNavigate }) {
+  const [canteenOpen, setCanteenOpen] = useState(page === 'payment');
+  useEffect(() => { if (page === 'payment') setCanteenOpen(true); }, [page]);
   const nav = [
     { icon: LayoutDashboard, label: 'Tổng quan' },
     { icon: FolderKanban, label: 'Quản lý công việc' },
@@ -41,6 +164,13 @@ function Sidebar({ mobileOpen, close, notify, page, onNavigate }) {
         const active = destination === page;
         return <button key={label} className={`nav-link ${active ? 'active' : ''}`} onClick={() => destination ? onNavigate(destination) : notify('Mục này đang được phát triển.')}><Icon size={19} strokeWidth={1.9} /><span>{label}</span>{active && <span className="nav-active-dot" />}</button>;
       })}</nav>
+      <div className="sidebar-label sidebar-label-second">NHÀ ĂN</div>
+      <nav className="nav-list" aria-label="Điều hướng nhà ăn">
+        <button className={`nav-link nav-parent ${canteenOpen ? 'open' : ''}`} onClick={() => setCanteenOpen(open => !open)} aria-expanded={canteenOpen}><UtensilsCrossed size={19} strokeWidth={1.9} /><span>Quản lý nhà ăn</span><ChevronDown size={15} className="nav-chevron" /></button>
+        {canteenOpen && <div className="nav-sub">
+          <button className={`nav-link nav-child ${page === 'payment' ? 'active' : ''}`} onClick={() => onNavigate('payment')}><Wallet size={17} strokeWidth={1.9} /><span>Kiểm tra payment</span>{page === 'payment' && <span className="nav-active-dot" />}</button>
+        </div>}
+      </nav>
       <div className="sidebar-bottom"><div className="sidebar-label">HỖ TRỢ</div><button className="nav-link" onClick={() => notify('Phần cài đặt đang được phát triển.')}><Settings2 size={19} strokeWidth={1.9} /><span>Cài đặt</span></button><button className="nav-link" onClick={() => notify('Bạn có thể tải lên Excel hoặc dùng dữ liệu mẫu để thử đối soát.')}><HelpCircle size={19} strokeWidth={1.9} /><span>Trung tâm trợ giúp</span></button><div className="sidebar-profile"><div className="profile-avatar">AD</div><div className="profile-copy"><strong>Admin Workspace</strong><span>Quản trị viên</span></div><MoreHorizontal size={18} className="muted" /></div></div>
     </aside>
   </>;
@@ -294,9 +424,9 @@ function App() {
   return <div className="app-shell">
     <Sidebar mobileOpen={mobileOpen} close={() => setMobileOpen(false)} notify={notify} page={page} onNavigate={navigate} />
     <main className="main-area">
-      <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-btn" onClick={() => setMobileOpen(true)} aria-label="Mở menu"><Menu size={21} /></button><span className="breadcrumb-muted">Không gian làm việc</span><ChevronRight size={15} /><strong>{page === 'personnel' ? 'Nhân sự' : 'Quản lý bảo vệ'}</strong></div><div className="topbar-right"><span className="topbar-date"><CalendarDays size={16} />{new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: 'long', year: 'numeric' }).format(now)}</span><span className="topbar-divider" /><button className="icon-btn notification" onClick={() => notify('Bạn không có thông báo mới.')} aria-label="Thông báo"><Bell size={19} /></button><span className="top-avatar">AD</span></div></header>
+      <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-btn" onClick={() => setMobileOpen(true)} aria-label="Mở menu"><Menu size={21} /></button><span className="breadcrumb-muted">Không gian làm việc</span><ChevronRight size={15} /><strong>{page === 'personnel' ? 'Nhân sự' : page === 'payment' ? 'Kiểm tra payment' : 'Quản lý bảo vệ'}</strong></div><div className="topbar-right"><span className="topbar-date"><CalendarDays size={16} />{new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: 'long', year: 'numeric' }).format(now)}</span><span className="topbar-divider" /><button className="icon-btn notification" onClick={() => notify('Bạn không có thông báo mới.')} aria-label="Thông báo"><Bell size={19} /></button><span className="top-avatar">AD</span></div></header>
       <div className="content">
-        {page === 'personnel' ? <PersonnelPage personnel={personnel} setPersonnel={setPersonnel} branches={branches} notify={notify} onBack={() => navigate('reconciliation')} /> : <>
+        {page === 'personnel' ? <PersonnelPage personnel={personnel} setPersonnel={setPersonnel} branches={branches} notify={notify} onBack={() => navigate('reconciliation')} /> : page === 'payment' ? <PaymentCheckPage notify={notify} /> : <>
           <div className="page-intro"><div><div className="eyebrow"><span className="eyebrow-line" /> VẬN HÀNH NHÂN SỰ <span className="eyebrow-separator">/</span> BẢO VỆ</div><h1>Đối soát bảng công <span>bảo vệ</span></h1><p>Tải lên dữ liệu, phát hiện chênh lệch và kiểm tra công bảo vệ trong một nơi.</p></div><div className="intro-actions"><label className="month-picker"><CalendarDays size={17} /><span>Tháng đối soát</span><input type="month" value={period} onChange={e => { if (e.target.value) { setPeriod(e.target.value); setSearch(''); } }} aria-label="Tháng đối soát" /></label><button className="export-btn" disabled={!result || !result.differences.length} onClick={() => exportCSV(result.differences, period, scopeLabel)}><ArrowDownToLine size={17} /> Xuất báo cáo</button></div></div>
           <div className="section-title-row"><div><span className="section-kicker">BƯỚC 01 — DỮ LIỆU ĐẦU VÀO</span><h2>Tải dữ liệu để đối soát</h2><p>Sử dụng hai file Excel cùng kỳ công để có kết quả chính xác.</p></div><button className="sample-link" onClick={resetDemo}><Sparkles size={16} /> Dùng dữ liệu mẫu <ArrowRight size={15} /></button></div>
           <div className="upload-grid">{['summary', 'attendance'].map((type, i) => <UploadCard key={type} type={type} index={i + 1} data={files[type]} config={configs[type]} onFile={(file, config) => updateFile(type, file, config)} onRemove={() => removeFile(type)} onConfig={(config, sheet) => changeConfig(type, config, sheet)} period={period} error={computed.errors[type]} diagnostics={computed.diagnostics[type]} notify={notify} />)}</div>

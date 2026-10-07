@@ -11,8 +11,26 @@ const dateKey = value => {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 };
 // Only real meal categories mark a portion ("Sáng - Mặn - Xưởng", "Ca chiều",
-// "Cơm ca đêm", "Sáng - Trung"...); stray codes like "CT" are not meals.
-const isMealCell = value => typeof value === 'number' ? value > 0 && value <= 3 : /(^| )(man|chay|trung|com|ca)( |$)/.test(normalize(value));
+// "Cơm ca đêm", "Sáng - Trung"...). Two kinds of notes never count:
+//  - "CT" / "CT - công tác" / "Đi công tác": nhân viên đi công tác, không ăn ở nhà ăn.
+//    Workbook gốc cũng loại ô này (cột kiểm tra dùng COUNTA(...) - COUNTIF(...,"CT")).
+//  - "Báo cắt cơm" / "Cắt cơm" / "Báo cắt" / "Hủy cơm" / "Không ăn": đã báo cắt phần ăn,
+//    nhà ăn không xuất phần nên không tính tiền.
+const TRIP_MARKER = /(^| )ct( |$)|cong tac/;
+const CUT_MARKER = /cat com|bao cat|(^| )cat( |$)|huy com|(^| )huy( |$)|khong an|(^| )bcc( |$)/;
+const MEAL_WORD = /(^| )(man|chay|trung|com|ca)( |$)/;
+export const classifyMealCell = value => {
+  if (typeof value === 'number') return value > 0 && value <= 3 ? 'meal' : null;
+  const key = normalize(value);
+  if (!key) return null;
+  if (CUT_MARKER.test(key)) return 'cut';
+  if (TRIP_MARKER.test(key)) return 'trip';
+  return MEAL_WORD.test(key) ? 'meal' : null;
+};
+const isMealCell = value => classifyMealCell(value) === 'meal';
+// Nhãn không phải phòng ban / không phải phần ăn (dòng "CT", "Báo cắt cơm" lẫn trong Pivot
+// hoặc Payment) — bỏ qua để không cộng nhầm vào tổng và không tạo phòng ban ảo.
+const isNonMealLabel = key => !!key && (TRIP_MARKER.test(key) || CUT_MARKER.test(key));
 const deptWord = n => /department|deparment|dept|phong ban|bo phan/.test(n);
 
 // ---------- Detail sheets: employee x date matrix ----------
@@ -35,18 +53,22 @@ export function parseCanteenDetail(rows) {
     if (/^(total|grand total|tong cong)/.test(normalize(name))) break;
     const department = text(row[deptCol]);
     if (isBlankDept(normalize(department))) continue;
-    let meals = 0, trung = 0;
+    let meals = 0, trung = 0, trip = 0, cut = 0;
     const days = {};
     for (const col of dateCols) {
       const value = row[col];
-      if (value == null || text(value) === '' || !isMealCell(value)) continue;
+      if (value == null || text(value) === '') continue;
+      const kind = classifyMealCell(value);
+      if (!kind) continue;
+      if (kind === 'trip') { trip += 1; continue; }
+      if (kind === 'cut') { cut += 1; continue; }
       const count = typeof value === 'number' && value > 0 ? value : 1;
       meals += count;
       const isTrung = /trung|expat|cn food/.test(normalize(value));
       if (isTrung) trung += count;
       days[dateKey((rows[0] || [])[col])] = { count, trung: isTrung };
     }
-    employees.push({ code: text(row[codeCol]), name, department, status: text(row[statusCol]), meals, trung, days });
+    employees.push({ code: text(row[codeCol]), name, department, status: text(row[statusCol]), meals, trung, trip, cut, days });
   }
   const perDay = new Map();
   for (const employee of employees) for (const [day, info] of Object.entries(employee.days)) {
@@ -58,6 +80,8 @@ export function parseCanteenDetail(rows) {
     headerRow, employees,
     totalMeals: employees.reduce((sum, e) => sum + e.meals, 0),
     totalTrung: employees.reduce((sum, e) => sum + e.trung, 0),
+    totalTrip: employees.reduce((sum, e) => sum + e.trip, 0),
+    totalCut: employees.reduce((sum, e) => sum + e.cut, 0),
     perDay,
   };
 }
@@ -74,16 +98,19 @@ export function parseCanteenPivot(rows) {
       const labelCol = (rows[i + 1] || []).findIndex((cell, cj) => cj >= col - 1 && /row labels/.test(normalize(cell)));
       if (labelCol < 0) continue;
       const entries = new Map();
+      const ignored = [];
       let grand = null;
       for (let r = i + 2; r < rows.length; r++) {
         const label = text((rows[r] || [])[labelCol]);
         if (!label) continue;
         const value = Number((rows[r] || [])[labelCol + 1]) || 0;
         if (/grand total/i.test(label)) { grand = value; break; }
-        if (isBlankDept(normalize(label))) continue;
+        const key = normalize(label);
+        if (isBlankDept(key)) continue;
+        if (isNonMealLabel(key)) { ignored.push({ label, value }); continue; }
         entries.set(label, value);
       }
-      if (entries.size) blocks.push({ name, entries, grand });
+      if (entries.size || ignored.length) blocks.push({ name, entries, grand, ignored });
     }
   }
   return { blocks };
@@ -91,7 +118,7 @@ export function parseCanteenPivot(rows) {
 
 // ---------- Payment sheet: daily totals, cost summary, cost per department ----------
 export function parseCanteenPayment(rows) {
-  const out = { daily: [], costSummary: null, perDepartment: new Map(), totalAmount: null, expatPrice: null, vietPrice: null };
+  const out = { daily: [], costSummary: null, perDepartment: new Map(), ignored: [], totalAmount: null, expatPrice: null, vietPrice: null };
   const dailyHeader = rows.findIndex(row => (row || []).some(cell => /^date$/.test(normalize(cell))) && (row || []).some(cell => /total meals per day/.test(normalize(cell))));
   if (dailyHeader >= 0) {
     const header = rows[dailyHeader];
@@ -131,6 +158,7 @@ export function parseCanteenPayment(rows) {
       if (/total amount/.test(normalize(dept))) { out.totalAmount = Number(row[amountCol]) || out.totalAmount; break; }
       const key = normalize(dept);
       if (isBlankDept(key)) continue;
+      if (isNonMealLabel(key)) { out.ignored.push({ label: dept, value: Number(row[mealCol]) || 0 }); continue; }
       out.perDepartment.set(key, { dept, meals: Number(row[mealCol]) || 0, price: Number(row[priceCol]) || 0, amount: Number(row[amountCol]) || 0 });
     }
   }
@@ -139,11 +167,11 @@ export function parseCanteenPayment(rows) {
 
 // Tiny synthetic dataset so the page can be demoed without a real file.
 export function createCanteenDemo() {
-  const emp = (department, meals, trung = 0) => ({ name: `NV ${department}`, department, meals, trung, days: {} });
+  const emp = (department, meals, trung = 0, trip = 0, cut = 0) => ({ name: `NV ${department}`, department, meals, trung, trip, cut, days: {} });
   const details = [{
     name: 'VP SÁNG (minh họa)',
-    employees: [emp('Pro - Packaging', 100), emp('Pro - Expat', 50, 50), emp('COO - IT', 30)],
-    totalMeals: 180, totalTrung: 50, perDay: new Map(),
+    employees: [emp('Pro - Packaging', 100, 0, 2, 1), emp('Pro - Expat', 50, 50), emp('COO - IT', 30)],
+    totalMeals: 180, totalTrung: 50, totalTrip: 2, totalCut: 1, perDay: new Map(),
   }];
   const pivot = { blocks: [{ name: 'VCV Sáng (minh họa)', grand: 178, entries: new Map([['Pro - Packaging', 100], ['Pro - Expat', 50], ['COO - IT', 28]]) }] };
   const payment = {
@@ -165,8 +193,10 @@ export function checkCanteen(detailSheets, pivot, payment, tolerance = 0) {
   for (const sheet of detailSheets) {
     for (const employee of sheet.employees) {
       const key = normalize(employee.department);
-      const item = deptDetail.get(key) || { dept: employee.department, meals: 0, trung: 0, people: 0 };
-      item.meals += employee.meals; item.trung += employee.trung; item.people += 1;
+      const item = deptDetail.get(key) || { dept: employee.department, meals: 0, trung: 0, trip: 0, cut: 0, people: 0 };
+      item.meals += employee.meals; item.trung += employee.trung;
+      item.trip += employee.trip ?? 0; item.cut += employee.cut ?? 0;
+      item.people += 1;
       deptDetail.set(key, item);
     }
     for (const [day, info] of sheet.perDay) {
@@ -193,6 +223,8 @@ export function checkCanteen(detailSheets, pivot, payment, tolerance = 0) {
       dept: detail?.dept || payment.perDepartment.get(dept)?.dept || deptPivotLabel.get(dept) || dept,
       detail: detail?.meals ?? null,
       detailTrung: detail?.trung ?? null,
+      detailTrip: detail?.trip ?? null,
+      detailCut: detail?.cut ?? null,
       people: detail?.people ?? null,
       pivot: deptPivot.get(dept) ?? null,
       payment: payment.perDepartment.get(dept) || null,
@@ -230,8 +262,11 @@ export function checkCanteen(detailSheets, pivot, payment, tolerance = 0) {
     if (!fromDetail) { if (day.total > tolerance) dailyIssues.push({ date: day.date, detail: null, payment: day.total }); continue; }
     if (Math.abs(fromDetail.meals - day.total) > tolerance) dailyIssues.push({ date: day.date, detail: fromDetail.meals, payment: day.total });
   }
+  const detailTrip = [...deptDetail.values()].reduce((sum, item) => sum + item.trip, 0);
+  const detailCut = [...deptDetail.values()].reduce((sum, item) => sum + item.cut, 0);
   const totals = {
     detailTotal, detailTrung, detailViet: detailTotal - detailTrung,
+    detailTrip, detailCut,
     pivotTotal,
     payMeals, payAmount,
     payExpatMeals: payment.costSummary?.expatMeals ?? null,
@@ -247,5 +282,7 @@ export function checkCanteen(detailSheets, pivot, payment, tolerance = 0) {
     missing: rows.filter(row => row.kind === 'missing'),
     dailyIssues, totals,
     pivotBlocks: pivot.blocks.map(block => ({ name: block.name, grand: block.grand ?? [...block.entries.values()].reduce((a, b) => a + b, 0) })),
+    pivotIgnored: pivot.blocks.flatMap(block => (block.ignored || []).map(item => ({ ...item, block: block.name }))),
+    paymentIgnored: payment.ignored || [],
   };
 }

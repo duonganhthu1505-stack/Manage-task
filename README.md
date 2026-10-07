@@ -4,6 +4,12 @@ Giao diện quản lý và đối soát bảng công bảo vệ, chạy hoàn to
 
 Từ mục **Nhà ăn → Quản lý nhà ăn → Kiểm tra payment** trong thanh bên, bạn có thể kiểm tra payment hàng tháng của nhà ăn: tải lên một file Excel gồm sheet **Pivot**, các sheet **Detail** và sheet **Payment**; hệ thống cộng gộp Detail theo từng người rồi so với **Pivot** (gốc so sánh), đồng thời so **Payment** với **Pivot**, liệt kê người **lệch số tiền** hoặc **thiếu ở một sheet**, kèm xuất báo cáo CSV.
 
+## Triển khai GitHub Pages
+
+Workflow `.github/workflows/deploy.yml` tự chạy kiểm thử, build và deploy khi có thay đổi trên `main`; cũng có thể chạy thủ công trong tab **Actions**. Khi mở pull request vào `main`, workflow chỉ kiểm thử và build, không triển khai.
+
+Trong **Settings → Pages**, chọn **GitHub Actions** làm nguồn triển khai nếu chưa được thiết lập. Với repository Pages, URL sẽ có dạng `https://<owner>.github.io/Manage-task/`; cấu hình Vite tự đặt đường dẫn cơ sở `/Manage-task/` trong CI để các tệp JavaScript/CSS tải đúng.
+
 ## Chạy dự án
 
 ```bash

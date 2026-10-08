@@ -14,6 +14,7 @@ const demoFile = type => ({ kind: 'demo', name: type === 'summary' ? 'Bang_cong_
 const formatNumber = number => new Intl.NumberFormat('vi-VN').format(number);
 const formatMoney = number => new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 }).format(number);
 const formatSigned = number => `${number > 0 ? '+' : ''}${formatMoney(number)}`;
+const hasCanteenIssues = check => !!check && !!(check.differences.length || check.missing.length || check.dailyIssues.length || check.reconciliationIssues?.length);
 const formatDate = date => { const [year, month, day] = date.split('-'); return `${day}/${month}/${year}`; };
 function initials(name) { return name.trim().split(/\s+/).slice(-2).map(s => s[0]).join('').toUpperCase(); }
 function csvCell(value) { const safe = String(value ?? '').replace(/^[\s]*[=+@-]/, match => `'${match}`); return `"${safe.replaceAll('"', '""')}"`; }
@@ -29,7 +30,24 @@ function exportCSV(items, period, scopeLabel = 'Tất cả nhân viên') {
 const DELTA_LABELS = { 'pivot-detail': 'Pivot − Detail', 'payment-pivot': 'Payment − Pivot', price: 'Đơn giá', amount: 'Thành tiền' };
 
 function exportCanteenCSV(check, period) {
-  const rows = [['Phòng ban', 'Detail (cộng lại)', 'Pivot', 'Payment (phần)', 'Đơn giá', 'Thành tiền Payment', 'Trạng thái', 'Chi tiết vấn đề'], ...check.rows.filter(row => row.kind !== 'matched').map(row => [row.dept, row.detail ?? '', row.pivot ?? '', row.payment?.meals ?? '', row.payment?.price ?? '', row.payment?.amount ?? '', row.kind === 'diff' ? 'Lệch' : 'Thiếu', [...row.deltas.map(d => `${DELTA_LABELS[d.kind]}: ${formatSigned(d.delta)}`), ...row.notes].join(' | ')])];
+  const value = (amount, unit) => unit === 'money' ? `${formatMoney(amount)} ₫` : `${formatNumber(amount)} phần`;
+  const rows = [
+    ['Phòng ban / phép so sánh', 'Detail (cộng lại)', 'Pivot', 'Payment (phần)', 'Đơn giá', 'Thành tiền Payment', 'Trạng thái', 'Chi tiết vấn đề'],
+    ...check.rows.filter(row => row.kind !== 'matched').map(row => [row.dept, row.detail ?? '', row.pivot ?? '', row.payment?.meals ?? '', row.payment?.price ?? '', row.payment?.amount ?? '', row.kind === 'diff' ? 'Lệch' : 'Thiếu', [...row.deltas.map(d => `${DELTA_LABELS[d.kind]}: ${formatSigned(d.delta)}`), ...row.notes].join(' | ')]),
+    ...(check.reconciliationIssues || []).map(issue => [
+      `Đối soát: ${issue.label}`,
+      `${issue.leftLabel}: ${value(issue.leftValue, issue.unit)}`,
+      `${issue.rightLabel}: ${value(issue.rightValue, issue.unit)}`,
+      '', '', '', 'Lệch', `Chênh ${formatSigned(issue.delta)} ${issue.unit === 'money' ? '₫' : 'phần'}`,
+    ]),
+    ...(check.dailyIssues || []).map(issue => [
+      `Ngày ${formatDate(issue.date)}`,
+      `Detail: ${issue.detail} phần (Trung ${issue.detailExpat}, Việt ${issue.detailViet})`,
+      '',
+      `Payment: ${issue.payment} phần (Trung ${issue.paymentExpat}, Việt ${issue.paymentViet})`,
+      '', '', 'Lệch', `Tổng ${formatSigned(issue.deltas.meals)} · Trung ${formatSigned(issue.deltas.expat)} · Việt ${formatSigned(issue.deltas.viet)} phần`,
+    ]),
+  ];
   const blob = new Blob(['\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a'); link.href = url; link.download = `kiem-tra-payment-nha-an-${period}.csv`; document.body.appendChild(link); link.click(); link.remove();
@@ -41,11 +59,35 @@ function DeltaChips({ row }) {
   return <div className="pay-deltas">{row.deltas.map(d => <span key={d.kind} className={`pay-delta ${d.kind === 'amount' || d.kind === 'price' ? 'down' : 'up'}`}>{DELTA_LABELS[d.kind]}: {formatSigned(d.delta)}</span>)}{row.notes.map(note => <span key={note} className="pay-absent">{note}</span>)}</div>;
 }
 
+function ReconciliationCard({ check }) {
+  const issueCount = check.reconciliationIssues.length;
+  const dayIssueCount = check.dailyIssues.length;
+  const totalMismatchCount = issueCount + dayIssueCount;
+  const value = (amount, unit) => unit === 'money' ? `${formatMoney(amount)} ₫` : `${formatNumber(amount)} phần`;
+  return <section className="pay-reconciliation-card">
+    <div className="pay-reconciliation-heading">
+      <div><span className="section-kicker">ĐỐI SOÁT CHÉO TOÀN FILE</span><h2>Payment có khớp với nhau và với Detail / PRIOVOT không?</h2><p>Kiểm tra cơm Trung/Việt, tổng theo ngày, Cost Summary, Cost per Department, Pivot và phép tính thành tiền.</p></div>
+      <span className={`pay-reconciliation-count ${totalMismatchCount ? 'mismatch' : 'matched'}`}>{totalMismatchCount ? `${issueCount} tổng lệch · ${dayIssueCount} ngày lệch` : `${check.reconciliationChecks.length} mục đã khớp`}</span>
+    </div>
+    <div className="pay-reconciliation-grid">{check.reconciliationChecks.map(item => <div key={item.id} className={`pay-reconciliation-item ${item.matched ? 'matched' : 'mismatch'}`}>
+      <div className="pay-reconciliation-copy"><strong>{item.label}</strong><div className="pay-reconciliation-values"><span>{item.leftLabel}: <b>{value(item.leftValue, item.unit)}</b></span><span>{item.rightLabel}: <b>{value(item.rightValue, item.unit)}</b></span></div></div>
+      <span className="pay-reconciliation-result">{item.matched ? <><Check size={13} strokeWidth={3} /> Khớp</> : <><CircleAlert size={13} /> Lệch {formatSigned(item.delta)} {item.unit === 'money' ? '₫' : 'phần'}</>}</span>
+    </div>)}</div>
+    {check.dailyIssues.length > 0 && <details className="pay-daily-details">
+      <summary>{check.dailyIssues.length} ngày có tổng phần hoặc tỷ lệ cơm Trung/Việt lệch</summary>
+      <div className="pay-daily-list">{check.dailyIssues.map(issue => <div key={issue.date}>
+        <strong>{formatDate(issue.date)}</strong><span>Tổng: Detail {formatNumber(issue.detail)} / Payment {formatNumber(issue.payment)}</span><span>Trung: Detail {formatNumber(issue.detailExpat)} / Payment {formatNumber(issue.paymentExpat)}</span><span>Việt: Detail {formatNumber(issue.detailViet)} / Payment {formatNumber(issue.paymentViet)}</span>
+      </div>)}</div>
+    </details>}
+  </section>;
+}
+
 function PaymentCheckPage({ notify }) {
   const [period, setPeriod] = useState(initialPeriod);
   const [file, setFile] = useState(null);
   const [tolerance, setTolerance] = useState(0);
   const [search, setSearch] = useState('');
+  const [rowFilter, setRowFilter] = useState('all');
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef(null);
@@ -59,11 +101,12 @@ function PaymentCheckPage({ notify }) {
       const workbook = await readWorkbook(selected);
       setFile({ kind: 'file', name: selected.name, size: selected.size, workbook });
       setSearch('');
+      setRowFilter('all');
     } catch (e) { notify(`Không đọc được file: ${e.message}`, true); }
     finally { setBusy(false); if (inputRef.current) inputRef.current.value = ''; }
   };
-  const loadDemo = () => { setFile({ kind: 'demo', name: 'Du_lieu_nha_an_mau.xlsx' }); setSearch(''); notify('Đã tải dữ liệu nhà ăn minh họa.'); };
-  const clearFile = () => setFile(null);
+  const loadDemo = () => { setFile({ kind: 'demo', name: 'Du_lieu_nha_an_mau.xlsx' }); setSearch(''); setRowFilter('all'); notify('Đã tải dữ liệu nhà ăn minh họa.'); };
+  const clearFile = () => { setFile(null); setSearch(''); setRowFilter('all'); };
 
   const parsed = useMemo(() => {
     if (!file) return null;
@@ -90,10 +133,11 @@ function PaymentCheckPage({ notify }) {
   const check = parsed?.check;
   const totals = check?.totals;
   const isDemo = !!parsed?.demo;
-  const filteredRows = check ? check.rows.filter(row => !search || normalize(row.dept).includes(normalize(search))) : [];
+  const hasIssues = hasCanteenIssues(check);
+  const filteredRows = check ? check.rows.filter(row => (rowFilter === 'all' || row.kind !== 'matched') && (!search || normalize(row.dept).includes(normalize(search)))) : [];
 
   return <>
-    <div className="page-intro"><div><div className="eyebrow"><span className="eyebrow-line" /> NHÀ ĂN <span className="eyebrow-separator">/</span> THANH TOÁN</div><h1>Kiểm tra payment <span>nhà ăn</span></h1><p>Detail cộng lại phải khớp Pivot; Payment phải khớp Pivot theo phòng ban và đơn giá Trung / Việt.</p></div><div className="intro-actions"><label className="month-picker"><CalendarDays size={17} /><span>Tháng kiểm tra</span><input type="month" value={period} onChange={e => { if (e.target.value) { setPeriod(e.target.value); setSearch(''); } }} aria-label="Tháng kiểm tra" /></label><button className="export-btn" disabled={!check || !check.differences.length} onClick={() => exportCanteenCSV(check, period)}><ArrowDownToLine size={17} /> Xuất báo cáo</button></div></div>
+    <div className="page-intro"><div><div className="eyebrow"><span className="eyebrow-line" /> NHÀ ĂN <span className="eyebrow-separator">/</span> THANH TOÁN</div><h1>Kiểm tra payment <span>nhà ăn</span></h1><p>Đối soát chéo Detail, PRIOVOT và các bảng Payment: số phần, cơm Trung/Việt, đơn giá và thành tiền.</p></div><div className="intro-actions"><label className="month-picker"><CalendarDays size={17} /><span>Tháng kiểm tra</span><input type="month" value={period} onChange={e => { if (e.target.value) { setPeriod(e.target.value); setSearch(''); } }} aria-label="Tháng kiểm tra" /></label><button className="export-btn" disabled={!hasIssues} onClick={() => exportCanteenCSV(check, period)}><ArrowDownToLine size={17} /> Xuất báo cáo</button></div></div>
 
     <div className="section-title-row"><div><span className="section-kicker">BƯỚC 01 — FILE BÁO CÁO THÁNG</span><h2>Tải file Meal Daily report</h2><p>Hệ thống tự nhận diện các sheet Detail, PRIOVOT và Payment trong file.</p></div>{!file && <button className="sample-link" onClick={loadDemo}><Sparkles size={16} /> Dùng dữ liệu mẫu <ArrowRight size={15} /></button>}</div>
 
@@ -105,7 +149,7 @@ function PaymentCheckPage({ notify }) {
           {file ? <><div className="file-icon"><FileSpreadsheet size={23} strokeWidth={1.7} /></div><div className="file-info"><strong title={file.name}>{file.name}</strong><span>{isDemo ? 'File minh họa · Tải file thật để kiểm tra' : `${(file.size / 1024).toFixed(1)} KB · ${file.workbook.SheetNames.length} trang tính`}</span></div><button className="replace-btn" onClick={() => inputRef.current?.click()} title="Thay file" aria-label="Thay file"><CloudUpload size={18} /></button><button className="remove-btn" onClick={clearFile} title="Xóa file" aria-label="Xóa file"><X size={18} /></button></> : <button className="empty-dropzone" onClick={() => inputRef.current?.click()}><span className="upload-illustration"><UploadCloud size={24} strokeWidth={1.7} /></span><span><strong>{busy ? 'Đang đọc file...' : 'Nhấn để tải lên'} </strong>hoặc kéo thả file vào đây</span><small>Hỗ trợ .xlsx · Tối đa 15 MB</small></button>}
         </div>
       </div>
-      {!file && <div className="upload-card pay-guide"><h3>Cách hệ thống kiểm tra nhà ăn</h3><ol><li>Các sheet <b>detail</b> (nhân viên × ngày ăn) được cộng lại theo phòng ban; ô <b>CT (công tác)</b> và <b>báo cắt cơm</b> không tính là phần ăn.</li><li>Tổng detail phải khớp các khối trong <b>PRIOVOT</b> (Pivot được xây từ chính detail).</li><li><b>Payment</b> (Cost per Department) phải khớp Pivot theo <b>số phần ăn</b>, đơn giá Trung <b>50.000 ₫</b> / Việt <b>25.000 ₫</b> và thành tiền.</li></ol></div>}
+      {!file && <div className="upload-card pay-guide"><h3>Cách hệ thống kiểm tra nhà ăn</h3><ol><li>Cộng các sheet <b>detail</b> theo phòng ban và phân loại cơm Trung (kể cả nhãn <b>TQ</b>), Việt; <b>CT</b> và báo cắt cơm không tính là suất.</li><li>Đối chiếu tổng và từng phòng ban giữa <b>Detail</b> với <b>PRIOVOT</b>.</li><li>Đối chiếu chéo Payment theo ngày, <b>Cost Summary</b> và <b>Cost per Department</b> với Detail/Pivot; kiểm tra số suất × đơn giá có ra đúng thành tiền không.</li></ol></div>}
     </div>
 
     {parsed?.error && <div className="scope-warning"><CircleAlert size={17} /><div><strong>Chưa nhận diện được cấu trúc file nhà ăn</strong><span>{parsed.error}</span></div></div>}
@@ -116,7 +160,8 @@ function PaymentCheckPage({ notify }) {
         return <span key={sheet.name} className="pay-role-badge on" title={skipped ? `Không tính là phần ăn: ${skipped}` : ''}>Detail · {sheet.name.trim()}: {formatNumber(sheet.totalMeals)} phần{sheet.totalTrung ? ` (${sheet.totalTrung} Trung)` : ''}{skipped ? ` · bỏ ${skipped}` : ''}</span>;
       })}
       {check.pivotBlocks.map(block => <span key={block.name} className="pay-role-badge on">Pivot · {block.name}: {formatNumber(block.grand)}</span>)}
-      <span className="pay-role-badge on">Payment: {formatNumber(totals.payMeals)} phần · {formatMoney(totals.payAmount)} ₫</span>
+      <span className="pay-role-badge on">Payment · Cost per Department: {formatNumber(totals.payMeals)} phần · {formatMoney(totals.payAmount)} ₫</span>
+      {totals.paymentSummaryTotal != null && <span className="pay-role-badge on">Payment · Cost Summary: {formatNumber(totals.paymentSummaryTotal)} phần (Trung {formatNumber(totals.payExpatMeals ?? 0)} · Việt {formatNumber(totals.payVietMeals ?? 0)}) · {formatMoney(totals.paymentSummaryAmount ?? 0)} ₫</span>}
       {[...check.pivotIgnored.map(item => `Pivot "${item.label}"`), ...check.paymentIgnored.map(item => `Payment "${item.label}"`)].length > 0 && <span className="pay-role-badge" title="Ô/dòng ghi chú công tác hoặc báo cắt cơm — không phải phòng ban, không tính là phần ăn">Bỏ qua: {[...check.pivotIgnored.map(item => `Pivot "${item.label}"`), ...check.paymentIgnored.map(item => `Payment "${item.label}"`)].join(' · ')}</span>}
     </div>}
 
@@ -125,23 +170,23 @@ function PaymentCheckPage({ notify }) {
 
       <div className="stats-grid">
         <StatCard icon={UsersRound} label="Phòng ban kiểm tra" value={check.rows.length} sub={`${check.matched.length} phòng ban khớp hoàn toàn`} tone="neutral" />
-        <StatCard icon={CheckCheck} label="Tổng phần ăn" value={totals.pivotTotal} sub={`Detail ${formatNumber(totals.detailTotal)} · Payment ${formatNumber(totals.payMeals)}`} tone="neutral" />
-        <StatCard icon={CircleAlert} label="Phòng ban lệch" value={check.differences.length} sub={`${check.dailyIssues.length} ngày lệch`} tone="red" />
-        <StatCard icon={FileText} label="Tổng tiền payment (₫)" value={totals.payAmount} sub={`kỳ vọng ${formatMoney(totals.expectedAmount)} ₫`} tone={Math.abs((totals.costSummaryAmount ?? totals.payAmount) - totals.expectedAmount) <= tolerance ? 'neutral' : 'amber'} />
+        <StatCard icon={CheckCheck} label="Tổng phần ăn" value={totals.pivotTotal} sub={`Detail ${formatNumber(totals.detailTotal)} · Payment phòng ban ${formatNumber(totals.payMeals)} · Cost Summary ${totals.paymentSummaryTotal == null ? '—' : formatNumber(totals.paymentSummaryTotal)}`} tone="neutral" />
+        <StatCard icon={CircleAlert} label="Cảnh báo đối soát" value={check.differences.length + check.missing.length + check.reconciliationIssues.length + check.dailyIssues.length} sub={`${check.differences.length} phòng ban lệch · ${check.reconciliationIssues.length} tổng lệch · ${check.dailyIssues.length} ngày lệch`} tone={hasIssues ? 'red' : 'neutral'} />
+        <StatCard icon={FileText} label="Tổng tiền payment (₫)" value={totals.payAmount} sub={`Cost Summary ${totals.costSummaryAmount == null ? '—' : `${formatMoney(totals.costSummaryAmount)} ₫`} · kỳ vọng ${totals.expectedAmount == null ? '—' : `${formatMoney(totals.expectedAmount)} ₫`}`} tone={check.reconciliationIssues.some(issue => issue.unit === 'money') ? 'amber' : 'neutral'} />
       </div>
 
-      <div className={`alert-banner ${check.differences.length || check.dailyIssues.length ? 'warning' : 'success'}`}><div className="alert-icon">{check.differences.length || check.dailyIssues.length ? <CircleAlert size={21} /> : <CheckCheck size={21} />}</div><div><strong>{check.differences.length || check.dailyIssues.length ? `Phát hiện ${check.differences.length} phòng ban lệch và ${check.dailyIssues.length} ngày lệch` : 'Detail, Pivot và Payment khớp nhau'}</strong><p>{check.differences.length || check.dailyIssues.length ? 'Xem bảng dưới để biết từng phòng ban lệch ở cặp nào (Pivot − Detail, Payment − Pivot, đơn giá, thành tiền).' : `Tổng phần ăn ${formatNumber(totals.detailTotal)} (Detail) = ${formatNumber(totals.pivotTotal)} (Pivot); tiền kỳ vọng khớp Payment.`}</p></div>{totals && <span className="alert-side">Trung: {formatNumber(totals.detailTrung)} / {totals.payExpatMeals ?? '—'} · Việt: {formatNumber(totals.detailViet)} / {totals.payVietMeals ?? '—'} <ArrowRight size={16} /></span>}</div>
+      <div className={`alert-banner ${hasIssues ? 'warning' : 'success'}`}><div className="alert-icon">{hasIssues ? <CircleAlert size={21} /> : <CheckCheck size={21} />}</div><div><strong>{hasIssues ? `Phát hiện ${check.differences.length} phòng ban lệch · ${check.missing.length} thiếu · ${check.reconciliationIssues.length} đối soát tổng chưa khớp · ${check.dailyIssues.length} ngày lệch` : 'Detail, PRIOVOT và các bảng Payment khớp nhau'}</strong><p>{hasIssues ? 'Mở mục Đối soát chéo bên dưới để xem rõ cặp số nào đang lệch; bảng phòng ban cho biết chênh lệch từng đơn vị.' : `Tổng phần ăn ${formatNumber(totals.detailTotal)} (Detail) = ${formatNumber(totals.pivotTotal)} (PRIOVOT) = ${formatNumber(totals.payMeals)} (Payment).`}</p></div><span className="alert-side">Trung: Detail {formatNumber(totals.detailTrung)} / Payment {totals.payExpatMeals == null ? '—' : formatNumber(totals.payExpatMeals)} · Việt: Detail {formatNumber(totals.detailViet)} / Payment {totals.payVietMeals == null ? '—' : formatNumber(totals.payVietMeals)}</span></div>
+
+      <ReconciliationCard check={check} />
 
       <section className="results-card">
         <div className="results-head"><div><h2>Chi tiết theo phòng ban</h2><p>Detail cộng lại so với Pivot; Payment so với Pivot (phần ăn, đơn giá, thành tiền)</p></div><span className="auto-badge"><span />Tự động cập nhật</span></div>
-        <div className="results-toolbar"><div className="tabs"><button className="selected">Tất cả <span>{check.rows.length}</span></button><button onClick={() => setSearch('')}>Lệch <span>{check.differences.length}</span></button></div><div className="table-controls"><label className="search-box"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm phòng ban..." aria-label="Tìm phòng ban" />{search && <button onClick={() => setSearch('')} aria-label="Xóa tìm kiếm"><X size={14} /></button>}</label></div></div>
+        <div className="results-toolbar"><div className="tabs"><button className={rowFilter === 'all' ? 'selected' : ''} onClick={() => setRowFilter('all')}>Tất cả <span>{check.rows.length}</span></button><button className={rowFilter === 'issues' ? 'selected' : ''} onClick={() => setRowFilter('issues')}>Lệch / thiếu <span>{check.differences.length + check.missing.length}</span></button></div><div className="table-controls"><label className="search-box"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm phòng ban..." aria-label="Tìm phòng ban" />{search && <button onClick={() => setSearch('')} aria-label="Xóa tìm kiếm"><X size={14} /></button>}</label></div></div>
         <div className="table-scroll"><table className="payment-table"><thead><tr><th>PHÒNG BAN</th><th>DETAIL</th><th>PIVOT</th><th>PAYMENT</th><th>ĐƠN GIÁ</th><th>THÀNH TIỀN</th><th>SO SÁNH / TRẠNG THÁI</th></tr></thead><tbody>{filteredRows.map(row => <tr key={row.dept}><td><div className="person-cell"><span className="person-avatar">{initials(row.dept)}</span><div><strong>{row.dept}</strong><small>{row.people ? `${row.people} nhân viên · ${row.detailTrung || 0} phần Trung${row.detailTrip || row.detailCut ? ` · bỏ ${[row.detailTrip ? `${row.detailTrip} CT` : '', row.detailCut ? `${row.detailCut} cắt cơm` : ''].filter(Boolean).join(', ')}` : ''}` : 'không có trong detail'}</small></div></div></td><td><div className="pay-amount-cell"><strong>{row.detail == null ? '—' : formatNumber(row.detail)}</strong></div></td><td><div className="pay-amount-cell"><strong>{row.pivot == null ? '—' : formatNumber(row.pivot)}</strong></div></td><td><div className="pay-amount-cell"><strong>{row.payment ? formatNumber(row.payment.meals) : '—'}</strong></div></td><td><div className="pay-amount-cell"><strong>{row.payment ? formatMoney(row.payment.price) : '—'}</strong>{row.payment && row.payment.price !== row.expectedPrice && <small>kỳ vọng {formatMoney(row.expectedPrice)}</small>}</div></td><td><div className="pay-amount-cell"><strong>{row.payment ? formatMoney(row.payment.amount) : '—'}</strong></div></td><td><span className={`status-pill ${row.kind}`} style={{ marginRight: 6 }}><span className="status-icon">{row.kind === 'matched' ? <Check size={13} strokeWidth={3} /> : <CircleAlert size={13} strokeWidth={2.4} />}</span>{row.kind === 'matched' ? 'Đã khớp' : row.kind === 'diff' ? 'Lệch' : 'Thiếu'}</span><DeltaChips row={row} /></td></tr>)}{filteredRows.length === 0 && <tr><td colSpan={7}><div className="empty-results"><Search size={25} /><strong>Không tìm thấy phòng ban</strong><span>Thử từ khóa khác.</span></div></td></tr>}</tbody></table></div>
         <div className="table-footer"><span>Hiển thị <strong>{formatNumber(filteredRows.length)}</strong> / <strong>{formatNumber(check.rows.length)}</strong> phòng ban</span><span>{formatNumber(check.differences.length)} lệch · {formatNumber(check.missing.length)} thiếu</span></div>
       </section>
 
-      {check.dailyIssues.length > 0 && <div className="scope-warning" style={{ marginTop: 14 }}><CircleAlert size={17} /><div><strong>{check.dailyIssues.length} ngày có tổng phần ăn khác giữa Detail và Payment</strong><span>{check.dailyIssues.slice(0, 6).map(d => `${d.date}: detail ${d.detail ?? '—'} / payment ${d.payment}`).join(' · ')}{check.dailyIssues.length > 6 ? ' …' : ''}</span></div></div>}
-
-      <div className="bottom-note"><div className="bottom-note-icon"><ShieldCheck size={20} /></div><div><strong>Cách hệ thống kiểm tra nhà ăn</strong><p>Mỗi sheet detail (ma trận nhân viên × ngày) được cộng lại theo phòng ban rồi so với khối tương ứng trong <b>PRIOVOT</b>; <b>Payment</b> (Cost per Department) được so với Pivot theo số phần ăn, đơn giá (phòng ban Trung/expat = {formatMoney(totals.expatPrice)} ₫, Việt = {formatMoney(totals.vietPrice)} ₫) và thành tiền = phần ăn × đơn giá. Ô <b>"CT" (công tác)</b> và ô <b>"Báo cắt cơm" / "Cắt cơm" / "Hủy cơm"</b> không phải phần ăn nên không được cộng; các dòng tổng cộng / chữ ký cũng bị bỏ qua. Số ô bị bỏ qua được hiển thị ngay trên nhãn từng sheet Detail.</p></div><span>WORKLY INSIGHT</span></div>
+      <div className="bottom-note"><div className="bottom-note-icon"><ShieldCheck size={20} /></div><div><strong>Cách hệ thống kiểm tra nhà ăn</strong><p>Cộng Detail theo phòng ban và so với từng khối <b>PRIOVOT</b>; kiểm tra Payment theo ngày, Cost Summary, Cost per Department, số phần Trung/Việt và số tiền. Công thức được kiểm tra gồm số phần × đơn giá (Expat = {formatMoney(totals.expatPrice)} ₫, Việt = {formatMoney(totals.vietPrice)} ₫) và tổng từng hạng mục. Nhãn <b>"TQ"</b> được tính là cơm Trung; ô <b>"CT" (công tác)</b> và <b>"Báo cắt cơm" / "Cắt cơm" / "Hủy cơm"</b> không tính suất ăn. Dòng tổng cộng / chữ ký bị bỏ qua.</p></div><span>WORKLY INSIGHT</span></div>
     </>}
 
     {!file && <div className="waiting-card"><div className="waiting-icon"><UtensilsCrossed size={27} /></div><h2>Sẵn sàng kiểm tra payment nhà ăn</h2><p>Tải lên file Meal Daily report của tháng: hệ thống tự cộng detail theo phòng ban, đối chiếu Pivot và kiểm tra tiền thanh toán theo đơn giá Trung / Việt.</p><button onClick={loadDemo}>Xem thử với dữ liệu mẫu <ArrowRight size={16} /></button></div>}

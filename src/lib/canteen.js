@@ -2,6 +2,12 @@ import { normalize } from './reconcile.js';
 
 const text = value => String(value ?? '').trim();
 const round2 = number => Math.round(number * 100) / 100;
+// Keep department hyphens: the source has both "COO - Assistant" and "COO Assistant".
+const normalizeDepartment = value => String(value ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase()
+  .replace(/[‐‑‒–—―]/g, '-')
+  .replace(/[^a-z0-9-]+/g, ' ')
+  .trim().replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ');
 const isBlankDept = key => !key || /blank/.test(key);
 const isDateSerial = value => (typeof value === 'number' && value > 30000 && value < 60000) || value instanceof Date;
 const dateKey = value => {
@@ -19,6 +25,10 @@ const dateKey = value => {
 const TRIP_MARKER = /(^| )ct( |$)|cong tac/;
 const CUT_MARKER = /cat com|bao cat|(^| )cat( |$)|huy com|(^| )huy( |$)|khong an|(^| )bcc( |$)/;
 const MEAL_WORD = /(^| )(man|chay|trung|com|ca)( |$)/;
+// The workbook uses "TQ" on overtime cells (for example "Cơm tăng ca - TQ")
+// as a shorthand for Chinese/Expat meals, alongside "Trung" and "CN food".
+const EXPAT_MEAL_MARKER = /\b(?:trung|tq|expat|chinese|china|cn food)\b/;
+const isExpatMeal = value => EXPAT_MEAL_MARKER.test(normalize(value));
 export const classifyMealCell = value => {
   if (typeof value === 'number') return value > 0 && value <= 3 ? 'meal' : null;
   const key = normalize(value);
@@ -64,7 +74,7 @@ export function parseCanteenDetail(rows) {
       if (kind === 'cut') { cut += 1; continue; }
       const count = typeof value === 'number' && value > 0 ? value : 1;
       meals += count;
-      const isTrung = /trung|expat|cn food/.test(normalize(value));
+      const isTrung = isExpatMeal(value);
       if (isTrung) trung += count;
       days[dateKey((rows[0] || [])[col])] = { count, trung: isTrung };
     }
@@ -105,9 +115,9 @@ export function parseCanteenPivot(rows) {
         if (!label) continue;
         const value = Number((rows[r] || [])[labelCol + 1]) || 0;
         if (/grand total/i.test(label)) { grand = value; break; }
-        const key = normalize(label);
+        const key = normalizeDepartment(label);
         if (isBlankDept(key)) continue;
-        if (isNonMealLabel(key)) { ignored.push({ label, value }); continue; }
+        if (isNonMealLabel(normalize(label))) { ignored.push({ label, value }); continue; }
         entries.set(label, value);
       }
       if (entries.size || ignored.length) blocks.push({ name, entries, grand, ignored });
@@ -156,9 +166,9 @@ export function parseCanteenPayment(rows) {
       const dept = text(row[deptCol]);
       if (!dept) continue;
       if (/total amount/.test(normalize(dept))) { out.totalAmount = Number(row[amountCol]) || out.totalAmount; break; }
-      const key = normalize(dept);
+      const key = normalizeDepartment(dept);
       if (isBlankDept(key)) continue;
-      if (isNonMealLabel(key)) { out.ignored.push({ label: dept, value: Number(row[mealCol]) || 0 }); continue; }
+      if (isNonMealLabel(normalize(dept))) { out.ignored.push({ label: dept, value: Number(row[mealCol]) || 0 }); continue; }
       out.perDepartment.set(key, { dept, meals: Number(row[mealCol]) || 0, price: Number(row[priceCol]) || 0, amount: Number(row[amountCol]) || 0 });
     }
   }
@@ -178,9 +188,9 @@ export function createCanteenDemo() {
     daily: [], expatPrice: 50000, vietPrice: 25000, totalAmount: 5750000,
     costSummary: { expatMeals: 50, vietMeals: 130, expatAmount: 2500000, vietAmount: 3250000, totalMeals: 180, totalAmount: 5750000 },
     perDepartment: new Map([
-      ['pro packaging', { dept: 'Pro - Packaging', meals: 100, price: 25000, amount: 2550000 }],
-      ['pro expat', { dept: 'Pro - Expat', meals: 50, price: 50000, amount: 2500000 }],
-      ['coo it', { dept: 'COO - IT', meals: 28, price: 25000, amount: 700000 }],
+      ['pro-packaging', { dept: 'Pro - Packaging', meals: 100, price: 25000, amount: 2550000 }],
+      ['pro-expat', { dept: 'Pro - Expat', meals: 50, price: 50000, amount: 2500000 }],
+      ['coo-it', { dept: 'COO - IT', meals: 28, price: 25000, amount: 700000 }],
     ]),
   };
   return { details, pivot, payment };
@@ -188,101 +198,204 @@ export function createCanteenDemo() {
 
 // ---------- The monthly check ----------
 export function checkCanteen(detailSheets, pivot, payment, tolerance = 0) {
+  const allowedDifference = Math.max(0, Number(tolerance) || 0);
+  const reconciliationChecks = [];
+  const addCheck = (id, label, leftLabel, leftValue, rightLabel, rightValue, unit = 'meals') => {
+    if (leftValue == null || rightValue == null || !Number.isFinite(Number(leftValue)) || !Number.isFinite(Number(rightValue))) return;
+    const left = Number(leftValue);
+    const right = Number(rightValue);
+    const delta = round2(left - right);
+    reconciliationChecks.push({ id, label, leftLabel, leftValue: left, rightLabel, rightValue: right, delta, unit, matched: Math.abs(delta) <= allowedDifference });
+  };
+
   const deptDetail = new Map();
   const perDay = new Map();
   for (const sheet of detailSheets) {
     for (const employee of sheet.employees) {
-      const key = normalize(employee.department);
+      const key = normalizeDepartment(employee.department);
+      if (!key) continue;
       const item = deptDetail.get(key) || { dept: employee.department, meals: 0, trung: 0, trip: 0, cut: 0, people: 0 };
-      item.meals += employee.meals; item.trung += employee.trung;
-      item.trip += employee.trip ?? 0; item.cut += employee.cut ?? 0;
+      item.meals += Number(employee.meals) || 0;
+      item.trung += Number(employee.trung) || 0;
+      item.trip += Number(employee.trip) || 0;
+      item.cut += Number(employee.cut) || 0;
       item.people += 1;
       deptDetail.set(key, item);
     }
-    for (const [day, info] of sheet.perDay) {
+    for (const [day, info] of sheet.perDay || []) {
       const item = perDay.get(day) || { meals: 0, trung: 0 };
-      item.meals += info.meals; item.trung += info.trung;
+      item.meals += Number(info.meals) || 0;
+      item.trung += Number(info.trung) || 0;
       perDay.set(day, item);
     }
   }
+
   const deptPivot = new Map();
   const deptPivotLabel = new Map();
-  for (const block of pivot.blocks) for (const [label, value] of block.entries) {
-    const key = normalize(label);
+  const pivotBlocks = pivot.blocks || [];
+  for (const block of pivotBlocks) for (const [label, value] of block.entries || []) {
+    const key = normalizeDepartment(label);
     if (isBlankDept(key)) continue;
-    deptPivot.set(key, (deptPivot.get(key) || 0) + value);
+    deptPivot.set(key, (deptPivot.get(key) || 0) + (Number(value) || 0));
     if (!deptPivotLabel.has(key)) deptPivotLabel.set(key, label);
   }
-  const deptKeys = new Set([...deptDetail.keys(), ...deptPivot.keys(), ...payment.perDepartment.keys()]);
+
+  const paymentDepartments = payment.perDepartment || new Map();
+  const deptKeys = new Set([...deptDetail.keys(), ...deptPivot.keys(), ...paymentDepartments.keys()]);
   const expatPrice = payment.expatPrice ?? 50000;
   const vietPrice = payment.vietPrice ?? 25000;
   const rows = [];
   for (const dept of deptKeys) {
     const detail = deptDetail.get(dept) || null;
+    const paymentItem = paymentDepartments.get(dept) || null;
     const entry = {
-      dept: detail?.dept || payment.perDepartment.get(dept)?.dept || deptPivotLabel.get(dept) || dept,
+      dept: detail?.dept || paymentItem?.dept || deptPivotLabel.get(dept) || dept,
       detail: detail?.meals ?? null,
       detailTrung: detail?.trung ?? null,
       detailTrip: detail?.trip ?? null,
       detailCut: detail?.cut ?? null,
       people: detail?.people ?? null,
       pivot: deptPivot.get(dept) ?? null,
-      payment: payment.perDepartment.get(dept) || null,
+      payment: paymentItem,
       deltas: [], notes: [],
     };
     const isExpatDept = /expat/.test(normalize(dept)) || (detail && detail.meals > 0 && detail.trung / detail.meals >= 0.5);
     entry.expectedPrice = isExpatDept ? expatPrice : vietPrice;
     if (entry.detail != null && entry.pivot != null) {
       const delta = entry.pivot - entry.detail;
-      if (Math.abs(delta) > tolerance) entry.deltas.push({ kind: 'pivot-detail', delta });
+      if (Math.abs(delta) > allowedDifference) entry.deltas.push({ kind: 'pivot-detail', delta });
     } else if (entry.detail != null || entry.pivot != null) entry.notes.push(entry.detail == null ? 'Không có ở Detail' : 'Không có ở Pivot');
     if (entry.payment && entry.pivot != null) {
       const delta = entry.payment.meals - entry.pivot;
-      if (Math.abs(delta) > tolerance) entry.deltas.push({ kind: 'payment-pivot', delta });
+      if (Math.abs(delta) > allowedDifference) entry.deltas.push({ kind: 'payment-pivot', delta });
     } else if (entry.payment && entry.pivot == null) entry.notes.push('Không có ở Pivot');
     else if (!entry.payment) entry.notes.push('Không có ở Payment');
     if (entry.payment) {
       if (entry.payment.price !== entry.expectedPrice) entry.deltas.push({ kind: 'price', delta: entry.payment.price - entry.expectedPrice });
       const expectedAmount = entry.payment.meals * entry.payment.price;
-      if (Math.abs(expectedAmount - entry.payment.amount) > tolerance) entry.deltas.push({ kind: 'amount', delta: round2(entry.payment.amount - expectedAmount) });
+      if (Math.abs(expectedAmount - entry.payment.amount) > allowedDifference) entry.deltas.push({ kind: 'amount', delta: round2(entry.payment.amount - expectedAmount) });
     }
     entry.kind = entry.deltas.length ? 'diff' : entry.notes.length ? 'missing' : 'matched';
-    entry.maxAbsDelta = entry.deltas.reduce((max, d) => Math.max(max, Math.abs(d.delta)), 0);
+    entry.maxAbsDelta = entry.deltas.reduce((max, delta) => Math.max(max, Math.abs(delta.delta)), 0);
     rows.push(entry);
   }
   rows.sort((a, b) => b.maxAbsDelta - a.maxAbsDelta || a.dept.localeCompare(b.dept, 'vi'));
+
   const detailTotal = [...deptDetail.values()].reduce((sum, item) => sum + item.meals, 0);
   const detailTrung = [...deptDetail.values()].reduce((sum, item) => sum + item.trung, 0);
+  const detailViet = detailTotal - detailTrung;
   const pivotTotal = [...deptPivot.values()].reduce((sum, value) => sum + value, 0);
-  const payMeals = [...payment.perDepartment.values()].reduce((sum, item) => sum + item.meals, 0);
-  const payAmount = [...payment.perDepartment.values()].reduce((sum, item) => sum + item.amount, 0);
-  const dailyIssues = [];
-  for (const day of payment.daily) {
-    const fromDetail = perDay.get(day.date);
-    if (!fromDetail) { if (day.total > tolerance) dailyIssues.push({ date: day.date, detail: null, payment: day.total }); continue; }
-    if (Math.abs(fromDetail.meals - day.total) > tolerance) dailyIssues.push({ date: day.date, detail: fromDetail.meals, payment: day.total });
+  const payMeals = [...paymentDepartments.values()].reduce((sum, item) => sum + (Number(item.meals) || 0), 0);
+  const payAmount = [...paymentDepartments.values()].reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const costSummary = payment.costSummary || null;
+  const paymentDaily = Array.isArray(payment.daily) ? payment.daily : [];
+  const dailyTotals = paymentDaily.reduce((sum, day) => sum + (Number(day.total) || 0), 0);
+  const dailyExpat = paymentDaily.reduce((sum, day) => sum + (Number(day.expat) || 0), 0);
+  const dailyViet = dailyTotals - dailyExpat;
+  const expectedAmount = costSummary
+    ? round2((Number(costSummary.expatMeals) || 0) * expatPrice + (Number(costSummary.vietMeals) || 0) * vietPrice)
+    : null;
+
+  // Reconcile the Pivot's own subtotals, then the monthly totals across all three sources.
+  let pivotGrandTotal = 0;
+  pivotBlocks.forEach((block, index) => {
+    const entriesTotal = [...(block.entries || new Map()).values()].reduce((sum, value) => sum + (Number(value) || 0), 0);
+    const grand = block.grand == null ? entriesTotal : Number(block.grand) || 0;
+    pivotGrandTotal += grand;
+    if (block.grand != null) {
+      addCheck(`pivot-block-${index}`, `PRIOVOT ${block.name}: Grand Total ↔ tổng dòng`, 'Grand Total', grand, 'Cộng theo phòng ban', entriesTotal);
+    }
+  });
+  addCheck('pivot-grand-total', 'PRIOVOT: tổng Grand Total các khối ↔ tổng dòng', 'Grand Total các khối', pivotGrandTotal, 'Cộng theo phòng ban', pivotTotal);
+  addCheck('detail-pivot-total', 'Tổng phần ăn: Detail ↔ PRIOVOT', 'Detail', detailTotal, 'PRIOVOT', pivotTotal);
+  addCheck('payment-department-pivot', 'Tổng phần ăn: Payment phòng ban ↔ PRIOVOT', 'Payment · phòng ban', payMeals, 'PRIOVOT', pivotTotal);
+
+  if (costSummary) {
+    addCheck('detail-payment-total', 'Tổng phần ăn: Detail ↔ Payment Cost Summary', 'Detail', detailTotal, 'Cost Summary', costSummary.totalMeals);
+    addCheck('detail-payment-expat', 'Cơm Trung: Detail ↔ Payment Expat', 'Detail · Trung/TQ', detailTrung, 'Payment · Expat', costSummary.expatMeals);
+    addCheck('detail-payment-viet', 'Cơm Việt: Detail ↔ Payment Vietnamese', 'Detail · Việt', detailViet, 'Payment · Vietnamese', costSummary.vietMeals);
+    addCheck('payment-summary-departments', 'Payment: Cost Summary ↔ Cost per Department (số phần)', 'Cost Summary', costSummary.totalMeals, 'Cộng phòng ban', payMeals);
+    addCheck('payment-summary-department-amount', 'Payment: Cost Summary ↔ Cost per Department (thành tiền)', 'Cost Summary', costSummary.totalAmount, 'Cộng phòng ban', payAmount, 'money');
+    addCheck('payment-summary-expected-amount', 'Payment: số phần × đơn giá ↔ thành tiền tổng hợp', 'Số phần × đơn giá', expectedAmount, 'Cost Summary', costSummary.totalAmount, 'money');
+    addCheck('payment-summary-category-amount', 'Payment: thành tiền Expat + Vietnamese ↔ tổng hợp', 'Cộng hai nhóm cơm', (Number(costSummary.expatAmount) || 0) + (Number(costSummary.vietAmount) || 0), 'Cost Summary', costSummary.totalAmount, 'money');
+    addCheck('payment-expat-amount', 'Payment: Expat × đơn giá ↔ thành tiền Expat', 'Số phần × đơn giá', (Number(costSummary.expatMeals) || 0) * expatPrice, 'Cost Summary · Expat', costSummary.expatAmount, 'money');
+    addCheck('payment-viet-amount', 'Payment: Vietnamese × đơn giá ↔ thành tiền Vietnamese', 'Số phần × đơn giá', (Number(costSummary.vietMeals) || 0) * vietPrice, 'Cost Summary · Vietnamese', costSummary.vietAmount, 'money');
+    addCheck('payment-cost-summary-department-total', 'Payment: dòng tổng tiền ↔ tổng Cost per Department', 'Dòng tổng Payment', payment.totalAmount, 'Cộng phòng ban', payAmount, 'money');
+    if (paymentDaily.length) {
+      addCheck('payment-daily-cost-summary', 'Payment: tổng theo ngày ↔ Cost Summary', 'Cộng từng ngày', dailyTotals, 'Cost Summary', costSummary.totalMeals);
+      addCheck('payment-daily-footer', 'Payment: tổng theo ngày ↔ dòng Total Meals', 'Cộng từng ngày', dailyTotals, 'Dòng Total Meals', payment.dailyTotal);
+      addCheck('payment-daily-expat', 'Payment: Expat theo ngày ↔ Cost Summary', 'Cộng Expat từng ngày', dailyExpat, 'Cost Summary · Expat', costSummary.expatMeals);
+      addCheck('payment-daily-viet', 'Payment: cơm Việt theo ngày ↔ Cost Summary', 'Cộng cơm Việt từng ngày', dailyViet, 'Cost Summary · Vietnamese', costSummary.vietMeals);
+    }
+  } else {
+    addCheck('payment-cost-summary-department-total', 'Payment: dòng tổng tiền ↔ tổng Cost per Department', 'Dòng tổng Payment', payment.totalAmount, 'Cộng phòng ban', payAmount, 'money');
   }
+
+  const paymentByDay = new Map();
+  for (const day of paymentDaily) {
+    const item = paymentByDay.get(day.date) || { meals: 0, expat: 0 };
+    item.meals += Number(day.total) || 0;
+    item.expat += Number(day.expat) || 0;
+    paymentByDay.set(day.date, item);
+  }
+  const dailyIssues = [];
+  if (paymentDaily.length) {
+    const dates = new Set([...perDay.keys(), ...paymentByDay.keys()]);
+    for (const date of dates) {
+      const detail = perDay.get(date) || { meals: 0, trung: 0 };
+      const dayPayment = paymentByDay.get(date) || { meals: 0, expat: 0 };
+      const detailViet = detail.meals - detail.trung;
+      const paymentViet = dayPayment.meals - dayPayment.expat;
+      const deltas = {
+        meals: round2(detail.meals - dayPayment.meals),
+        expat: round2(detail.trung - dayPayment.expat),
+        viet: round2(detailViet - paymentViet),
+      };
+      if (Object.values(deltas).some(delta => Math.abs(delta) > allowedDifference)) {
+        dailyIssues.push({
+          date,
+          detail: detail.meals,
+          payment: dayPayment.meals,
+          detailExpat: detail.trung,
+          paymentExpat: dayPayment.expat,
+          detailViet,
+          paymentViet,
+          deltas,
+        });
+      }
+    }
+  }
+
   const detailTrip = [...deptDetail.values()].reduce((sum, item) => sum + item.trip, 0);
   const detailCut = [...deptDetail.values()].reduce((sum, item) => sum + item.cut, 0);
   const totals = {
-    detailTotal, detailTrung, detailViet: detailTotal - detailTrung,
+    detailTotal, detailTrung, detailViet,
     detailTrip, detailCut,
     pivotTotal,
     payMeals, payAmount,
-    payExpatMeals: payment.costSummary?.expatMeals ?? null,
-    payVietMeals: payment.costSummary?.vietMeals ?? null,
+    paymentTotalAmount: payment.totalAmount ?? null,
+    paymentDailyTotal: payment.dailyTotal ?? (paymentDaily.length ? dailyTotals : null),
+    paymentSummaryTotal: costSummary?.totalMeals ?? null,
+    paymentSummaryAmount: costSummary?.totalAmount ?? null,
+    payExpatMeals: costSummary?.expatMeals ?? null,
+    payVietMeals: costSummary?.vietMeals ?? null,
     expatPrice, vietPrice,
-    costSummaryAmount: payment.costSummary?.totalAmount ?? null,
-    expectedAmount: round2((payment.costSummary?.expatMeals ?? 0) * expatPrice + (payment.costSummary?.vietMeals ?? 0) * vietPrice),
+    costSummaryAmount: costSummary?.totalAmount ?? null,
+    expectedAmount,
   };
   const differences = rows.filter(row => row.kind === 'diff');
+  const reconciliationIssues = reconciliationChecks.filter(item => !item.matched);
   return {
-    rows, differences,
+    rows,
+    differences,
     matched: rows.filter(row => row.kind === 'matched'),
     missing: rows.filter(row => row.kind === 'missing'),
-    dailyIssues, totals,
-    pivotBlocks: pivot.blocks.map(block => ({ name: block.name, grand: block.grand ?? [...block.entries.values()].reduce((a, b) => a + b, 0) })),
-    pivotIgnored: pivot.blocks.flatMap(block => (block.ignored || []).map(item => ({ ...item, block: block.name }))),
+    dailyIssues,
+    reconciliationChecks,
+    reconciliationIssues,
+    totals,
+    pivotBlocks: pivotBlocks.map(block => ({ name: block.name, grand: block.grand ?? [...(block.entries || new Map()).values()].reduce((a, b) => a + b, 0) })),
+    pivotIgnored: pivotBlocks.flatMap(block => (block.ignored || []).map(item => ({ ...item, block: block.name }))),
     paymentIgnored: payment.ignored || [],
   };
 }

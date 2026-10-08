@@ -6,9 +6,9 @@ Từ mục **Nhà ăn → Quản lý nhà ăn → Kiểm tra payment** trong tha
 
 ## Triển khai GitHub Pages
 
-Workflow `.github/workflows/deploy.yml` tự chạy kiểm thử, build và deploy khi có thay đổi trên `main`; cũng có thể chạy thủ công trong tab **Actions**. Khi mở pull request vào `main`, workflow chỉ kiểm thử và build, không triển khai.
+URL production ổn định của website là **https://duonganhthu1505-stack.github.io/Manage-task/** — dùng cùng một link sau mỗi lần merge; nội dung sẽ được cập nhật tại link này khi workflow deploy trên `main` chạy thành công. Link **Live Preview** trong Arena chỉ là link xem thử theo phiên làm việc, không phải link production.
 
-Trong **Settings → Pages**, chọn **GitHub Actions** làm nguồn triển khai nếu chưa được thiết lập. Với repository Pages, URL sẽ có dạng `https://<owner>.github.io/Manage-task/`; cấu hình Vite tự đặt đường dẫn cơ sở `/Manage-task/` trong CI để các tệp JavaScript/CSS tải đúng.
+Workflow `.github/workflows/deploy.yml` tự chạy kiểm thử, build và deploy khi có thay đổi trên `main`; khi mở pull request vào `main`, workflow chỉ kiểm thử và build, không triển khai. Nếu Pages chưa được bật lần đầu, vào repository **Settings → Pages → Build and deployment → Source**, chọn **GitHub Actions**. Sau khi bật, đợi workflow trên `main` báo deploy thành công rồi dùng link production ở trên. Cấu hình Vite tự đặt đường dẫn cơ sở `/Manage-task/` trong CI.
 
 ## Chạy dự án
 
@@ -40,7 +40,7 @@ Mở địa chỉ Vite hiển thị trên terminal. Kiểm tra bằng `npm test`
 1. Mở mục **Nhà ăn → Quản lý nhà ăn → Kiểm tra payment** ở thanh bên, chọn **tháng kiểm tra**.
 2. Tải lên file Excel của tháng (`.xlsx`, tối đa 15 MB). Các sheet có tên chứa *pivot / tổng hợp*, *detail / chi tiết*, *payment / thanh toán* được tự gán vai trò; có thể đổi vai trò của từng sheet (hỗ trợ **nhiều sheet Detail** — được cộng gộp theo từng người).
 3. Mỗi sheet tự nhận diện dòng tiêu đề, cột họ tên và cột số tiền. Mở nút cấu hình bên phải sheet để chỉnh lại nếu file có bố cục khác (xem trước 6 dòng đầu sau khi đọc).
-4. **Pivot là gốc để so sánh**: Detail cộng lại phải khớp Pivot, Payment phải khớp Pivot. Kết quả hiển thị tổng tiền từng nguồn, số người **đã khớp / lệch số tiền / thiếu ở một sheet** (người không có ở một sheet chỉ được ghi chú, không tính là lệch tiền). Đặt **sai số cho phép** nếu muốn bỏ qua lệch nhỏ do làm tròn. Xuất báo cáo CSV bằng nút **Xuất báo cáo**.
+4. **Pivot là gốc để so sánh**: Detail cộng lại khớp PRIOVOT theo phòng ban; Payment Cost per Department khớp Pivot theo số phần, đơn giá và thành tiền. Hệ thống đối soát thêm các bảng Payment với nhau (tổng theo ngày, Cost Summary, Cost per Department, tổng tiền), kiểm tra công thức **số phần × đơn giá**, và so số phần **Trung/Expat** cùng **Việt** giữa Detail và Payment — kể cả khi tổng số phần chung vẫn khớp. Nhãn `TQ` trong Detail (ví dụ `Cơm tăng ca - TQ`) được tính vào nhóm cơm Trung/Expat. Kết quả hiển thị rõ cặp số đang lệch; có thể đặt **sai số cho phép** để bỏ qua lệch nhỏ do làm tròn. Xuất báo cáo CSV gồm chênh lệch theo phòng ban, theo ngày và đối soát tổng bằng nút **Xuất báo cáo**.
 
 Quy ước đọc file payment: dòng *Tổng cộng / Grand Total / chữ ký* được bỏ qua; ô ghi **`CT` / `công tác`** (nhân viên đi công tác, không ăn ở nhà ăn) và ô ghi **`Báo cắt cơm` / `Cắt cơm` / `Báo cắt` / `Hủy cơm` / `Không ăn`** (đã báo cắt phần ăn) **không được tính là phần ăn** — số ô bị bỏ qua hiển thị ngay trên nhãn từng sheet Detail và nhãn Pivot/Payment dạng `Bỏ qua: …` nếu có dòng lạ; các dòng/danh mục đó trong Pivot hoặc Payment cũng không tạo thành phòng ban trong bảng kết quả; số tiền chấp nhận định dạng `1234567`, `1.234.567`, `1,234,567`, `1.234.567,89`, `3.500.000 đ`; ghép nhân viên theo họ tên đã chuẩn hóa (không phân biệt dấu). File chỉ được xử lý trong trình duyệt, không gửi lên máy chủ.
 

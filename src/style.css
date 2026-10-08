@@ -190,3 +190,27 @@
 .pay-key-samples i{font-style:normal;font-size:8.5px;font-weight:700;color:#66788a;background:#eef2f6;border:1px solid #e3e9ef;border-radius:4px;padding:2px 6px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pay-total-value{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0}
 .pay-total-value small{font-size:8.5px;color:#98a1ab;white-space:nowrap}
+
+/* Cross-source canteen payment reconciliation */
+.pay-reconciliation-card{margin:0 0 17px;padding:19px 20px;border:1px solid #e7eaee;border-radius:10px;background:#fff;box-shadow:0 4px 17px #27323f04}
+.pay-reconciliation-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
+.pay-reconciliation-heading h2{margin-top:5px;color:#303944;font-size:15px;letter-spacing:-.35px}
+.pay-reconciliation-heading p{margin-top:5px;color:#929ca6;font-size:10.5px;line-height:1.5}
+.pay-reconciliation-count{flex:none;border:1px solid;border-radius:6px;padding:7px 9px;font-size:9.5px;font-weight:800;white-space:nowrap}
+.pay-reconciliation-count.matched{border-color:#dcebe2;background:#f0f8f3;color:#5d896a}
+.pay-reconciliation-count.mismatch{border-color:#f0ddda;background:#fff5f2;color:#bf6b5e}
+.pay-reconciliation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.pay-reconciliation-item{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;padding:10px 11px;border:1px solid #edf0f2;border-radius:7px;background:#fdfdfe}
+.pay-reconciliation-item.mismatch{border-color:#f0dfd9;background:#fffaf8}
+.pay-reconciliation-copy{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
+.pay-reconciliation-copy>strong{font-size:10px;line-height:1.4;color:#48535f}
+.pay-reconciliation-values{display:flex;flex-wrap:wrap;gap:4px 12px;color:#9ba5af;font-size:9px;line-height:1.4}
+.pay-reconciliation-values b{color:#697581;font-weight:700}
+.pay-reconciliation-result{display:inline-flex;align-items:center;gap:4px;flex:none;color:#659676;font-size:9px;font-weight:800;white-space:nowrap}
+.pay-reconciliation-item.mismatch .pay-reconciliation-result{color:#c56d61}
+.pay-daily-details{margin-top:12px;border-top:1px dashed #e8ecef;padding-top:10px;color:#7f8a95}
+.pay-daily-details summary{font-size:10px;font-weight:800;cursor:pointer}
+.pay-daily-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:9px}
+.pay-daily-list>div{display:flex;flex-wrap:wrap;gap:4px 10px;padding:8px 10px;border:1px solid #f0e5de;border-radius:6px;background:#fffaf6;color:#9b8171;font-size:9px}
+.pay-daily-list strong{width:100%;color:#735f53;font-size:9.5px}
+@media(max-width:760px){.pay-reconciliation-card{padding:15px 13px}.pay-reconciliation-heading{align-items:flex-start;flex-direction:column;gap:9px}.pay-reconciliation-heading h2{font-size:14px}.pay-reconciliation-grid,.pay-daily-list{grid-template-columns:1fr}.pay-reconciliation-item{align-items:flex-start;flex-direction:column;gap:6px}.pay-reconciliation-result{align-self:flex-end}}
